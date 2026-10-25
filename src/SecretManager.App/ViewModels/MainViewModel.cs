@@ -14,6 +14,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string query = "";
     private bool unlocked;
     private bool busy;
+    private bool disposed;
     private string status = "";
     private int generation;
     private Guid? lastExpanded;
@@ -28,8 +29,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public bool HasVault { get; private set; }
     public bool IsUnlocked { get => unlocked; private set { SetProperty(ref unlocked, value); SessionChanged?.Invoke(); } }
     public bool IsBusy { get => busy; private set => SetProperty(ref busy, value); }
-    public string Status { get => status; set => SetProperty(ref status, value); }
-    public string Query { get => query; set { if (SetProperty(ref query, value) && IsUnlocked) Refresh(); } }
+    public string Status { get => status; set { if (!disposed) SetProperty(ref status, value); } }
+    public string Query { get => query; set { if (!disposed && SetProperty(ref query, value) && IsUnlocked) Refresh(); } }
     public AppSettings Settings { get => settings; private set => SetProperty(ref settings, value); }
     public ObservableCollection<AssociationViewModel> Associations { get; } = [];
     public int TotalCount => IsUnlocked ? session.Document.Associations.Count : 0;
@@ -38,6 +39,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public async Task UnlockAsync(string password, string confirmation)
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
         if (IsBusy) return;
         IsBusy = true;
         var attempt = ++generation;
@@ -45,15 +47,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             if (!HasVault && password != confirmation) throw new ArgumentException("Пароли не совпадают.");
             await Task.Run(() => { if (HasVault) session.Unlock(password); else session.Create(password); });
-            if (attempt != generation) { session.Lock(); return; }
-            HasVault = true; Settings = session.Document.Settings;
+            if (disposed) { session.Lock(); return; }
+            // Creation may have committed while a lock request invalidated this
+            // attempt. The next login must open the existing vault, not create it.
+            HasVault = true; OnPropertyChanged(nameof(HasVault));
+            if (attempt != generation) { session.Lock(); SessionChanged?.Invoke(); return; }
+            Settings = session.Document.Settings;
             IsUnlocked = true; Query = ""; Refresh(); Status = "Хранилище открыто";
         }
-        finally { IsBusy = false; }
+        finally { if (disposed) busy = false; else IsBusy = false; }
     }
 
     public void Lock()
     {
+        if (disposed) return;
         generation++;
         session.Lock();
         // Collection/property bindings read CountLabel synchronously. Publish a consistent
@@ -128,5 +135,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<ImportConflict> FindConflicts(VaultDocument imported) => VaultMerge.FindConflicts(session.Document, imported);
     public void Import(VaultDocument imported, IReadOnlyDictionary<Guid, ConflictResolution> choices)
     { session.Save(VaultMerge.Merge(session.Document, imported, choices)); Refresh(); }
-    public void Dispose() { DetachAssociations(); session.Dispose(); }
+    public void Dispose()
+    {
+        if (disposed) return;
+        disposed = true; generation++; unlocked = false; busy = false;
+        session.Dispose(); DetachAssociations(); Associations.Clear(); query = ""; lastExpanded = null;
+    }
 }

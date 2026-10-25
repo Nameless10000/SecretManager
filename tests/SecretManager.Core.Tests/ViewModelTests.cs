@@ -86,6 +86,47 @@ public sealed class ViewModelTests : IDisposable
         Assert.False(vm.IsUnlocked); Assert.Empty(vm.Associations);
     }
 
+    [Fact]
+    public async Task LockDuringFirstCreationKeepsVaultClosedAndAllowsTheNextLogin()
+    {
+        using var vm = new MainViewModel(Database);
+        var pending = vm.UnlockAsync(Password, Password);
+        vm.Lock();
+        await pending;
+        Assert.False(vm.IsUnlocked); Assert.Empty(vm.Associations);
+        Assert.True(vm.HasVault);
+        await vm.UnlockAsync(Password, "");
+        Assert.True(vm.IsUnlocked);
+    }
+
+    [Fact]
+    public async Task RepeatedLockDuringPasswordVerificationDoesNotRevealOldItems()
+    {
+        using var vm = new MainViewModel(Database); await vm.UnlockAsync(Password, Password);
+        vm.SaveAssociation(new() { Title = "Синтетическая запись" }); vm.Lock();
+        var pending = vm.UnlockAsync(Password, "");
+        vm.Lock(); vm.Lock();
+        await pending;
+        Assert.False(vm.IsUnlocked); Assert.Empty(vm.Associations); Assert.Equal(0, vm.TotalCount);
+        await vm.UnlockAsync(Password, "");
+        Assert.Single(vm.Associations);
+    }
+
+    [Fact]
+    public async Task ClosingDuringFirstUnlockCannotReopenOrNotifyDisposedViewModel()
+    {
+        using var vm = new MainViewModel(Database);
+        var pending = vm.UnlockAsync(Password, Password);
+        vm.Dispose();
+        var notifications = 0;
+        vm.PropertyChanged += (_, _) => notifications++;
+        vm.SessionChanged += () => notifications++;
+        await pending;
+        Assert.False(vm.IsUnlocked); Assert.False(vm.IsBusy); Assert.Empty(vm.Associations);
+        vm.Query = "late binding update"; vm.Status = "late notification";
+        Assert.Equal(0, notifications);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
