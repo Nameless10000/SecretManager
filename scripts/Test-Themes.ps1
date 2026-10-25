@@ -1,4 +1,4 @@
-param([switch]$SkipBuild)
+param([switch]$SkipBuild, [ValidateRange(1, 20)][int]$Iterations = $(if ($env:GITHUB_ACTIONS -eq 'true') { 5 } else { 1 }))
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 Push-Location $projectRoot
@@ -9,6 +9,8 @@ try {
     }
     $output = Join-Path $projectRoot 'artifacts\theme-checks'
     New-Item -ItemType Directory -Force -Path $output | Out-Null
+    for ($iteration = 1; $iteration -le $Iterations; $iteration++) {
+    Write-Output "Native WinUI process check $iteration/$Iterations"
     foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt', 'native-error.txt')) {
         $previous = Join-Path $output $name
         if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous }
@@ -41,5 +43,6 @@ try {
         throw ("Theme process exit code: $exitCode`n" + ($result | ConvertTo-Json -Depth 4))
     }
     $result | ConvertTo-Json
+    }
 }
 finally { Remove-Item Env:SECRETMANAGER_THEME_CHECK_OUTPUT -ErrorAction SilentlyContinue; Pop-Location }
