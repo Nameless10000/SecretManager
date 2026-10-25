@@ -80,24 +80,38 @@ public sealed partial class ThemeCheckWindow : Window
                 .Select(s => s.Storyboard).OfType<Microsoft.UI.Xaml.Media.Animation.Storyboard>().Distinct()
                 .ToDictionary(s => s, s => (s.Duration, s.SpeedRatio));
             Check(nativeTimings.Count > 0, "Native visual-state timelines were not found.");
+            var toggleChecks = await CheckToggleScenarios();
             var motionSettings = new AppSettings { AnimationLevel = AnimationLevel.Maximum };
-            var motion = new MotionService(() => motionSettings);
+            var motion = new MotionService(() => motionSettings, () => true);
             motion.Wire(Root);
             var iconSurface = Descendants(AccentButton).OfType<ContentPresenter>().First();
             Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(180) : iconSurface.BackgroundTransition is null, "Hover background transition ignores the system motion setting.");
+            var expanderContent = Descendants(Card).OfType<Border>().Single(b => b.Name == "ExpanderContent");
+            foreach (var speed in new[] { .5, 1, 2 })
+            {
+                motionSettings = motionSettings with { MotionSpeed = speed }; motion.Wire(Root);
+                Check(nativeTimings.All(p => p.Key.SpeedRatio == p.Value.SpeedRatio), "Decorative speed changes a standard control's timing.");
+                Card.IsExpanded = false;
+                await Task.Delay(450);
+                Check(expanderContent.Visibility == Visibility.Collapsed, $"Card is still collapsing at decorative speed {speed}.");
+                Card.IsExpanded = true;
+                await Task.Delay(450);
+                Check(expanderContent.Visibility == Visibility.Visible && expanderContent.RenderTransform is CompositeTransform transform &&
+                    Math.Abs(transform.TranslateY) < .5, $"Card is still expanding at decorative speed {speed}.");
+            }
             motionSettings = motionSettings with { AnimationLevel = AnimationLevel.Off }; motion.Wire(Root);
             Check(iconSurface.BackgroundTransition is null, "Disabled animations still transition the hover background.");
-            Check(nativeTimings.All(p => p.Key.Duration.HasTimeSpan && p.Key.Duration.TimeSpan == TimeSpan.Zero &&
-                p.Key.SpeedRatio == p.Value.SpeedRatio), "Disabled native timelines must use zero duration without extreme playback rates.");
+            Check(nativeTimings.All(p => p.Key.Duration.Equals(p.Value.Duration) && p.Key.SpeedRatio == p.Value.SpeedRatio),
+                "Disabling effects must preserve standard control state timelines.");
             motionSettings = motionSettings with { AnimationLevel = AnimationLevel.Medium, MotionSpeed = 2 }; motion.Wire(Root);
             Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(60) : iconSurface.BackgroundTransition is null, "Hover transition ignores animation speed or system settings.");
-            Check(nativeTimings.All(p => motion.Enabled ? p.Key.Duration.Equals(p.Value.Duration) && p.Key.SpeedRatio == p.Value.SpeedRatio * 2 :
-                p.Key.Duration.HasTimeSpan && p.Key.Duration.TimeSpan == TimeSpan.Zero), "Re-enabling animation did not restore native timing.");
+            Check(nativeTimings.All(p => p.Key.Duration.Equals(p.Value.Duration) && p.Key.SpeedRatio == p.Value.SpeedRatio),
+                "Changing decorative speed changes standard control timing.");
             var noSystemMotion = new MotionService(() => motionSettings, () => false);
             noSystemMotion.Wire(Root);
             Check(!noSystemMotion.Enabled && iconSurface.BackgroundTransition is null, "Reduced system motion must disable custom animation.");
-            Check(nativeTimings.All(p => p.Key.Duration.HasTimeSpan && p.Key.Duration.TimeSpan == TimeSpan.Zero &&
-                p.Key.SpeedRatio == p.Value.SpeedRatio), "Reduced system motion must also disable native timelines safely.");
+            Check(nativeTimings.All(p => p.Key.Duration.Equals(p.Value.Duration) && p.Key.SpeedRatio == p.Value.SpeedRatio),
+                "Reduced system motion must preserve standard control state timelines.");
             var attachmentChecks = await AttachmentChecks.RunAsync(Card, output, Snapshot);
             // Detach decoded images before tearing down the XAML/composition tree.
             Card.Content = null; Root.UpdateLayout(); await NextFrame(); await NextFrame();
@@ -105,8 +119,9 @@ public sealed partial class ThemeCheckWindow : Window
             textInput.Focus(FocusState.Programmatic);
             Check(AccentButton.Focus(FocusState.Programmatic), "Could not clear text-input focus before WinUI shutdown.");
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
-            { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 3, NativeControls = true, IconFonts = true, HoverGutters = true,
-                ToastOverlay = true, ToastAutoDismiss = true, HoverBrushTransitions = true, SystemMotionDisabled = true, AttachmentChecks = attachmentChecks }));
+            { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 4, NativeControls = true, IconFonts = true, HoverGutters = true,
+                ToastOverlay = true, ToastAutoDismiss = true, HoverBrushTransitions = true, FixedControlTimings = true, ExpanderTransitions = 6,
+                ToggleChecks = toggleChecks, SystemMotionDisabled = true, AttachmentChecks = attachmentChecks }));
             Environment.ExitCode = 0;
         }
         catch (Exception ex)
@@ -129,6 +144,57 @@ public sealed partial class ThemeCheckWindow : Window
         }
     }
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
+    private async Task<int> CheckToggleScenarios()
+    {
+        var settings = new AppSettings();
+        var systemMotion = true;
+        var motion = new MotionService(() => settings, () => systemMotion);
+        var applying = false;
+        void Apply()
+        {
+            if (applying) return;
+            applying = true;
+            try { ThemeService.Apply(Root, settings); motion.Reset(Root); motion.Wire(Root); }
+            finally { applying = false; }
+        }
+        // Appearance preview runs synchronously from CompactChoice.Toggled in the
+        // real settings panel, while WinUI is still updating its visual states.
+        void Preview(object sender, RoutedEventArgs args) => Apply();
+        CompactToggle.Toggled += Preview;
+        var count = 0;
+        try
+        {
+            foreach (var theme in new[] { AppTheme.Light, AppTheme.Dark })
+            foreach (var level in new[] { AnimationLevel.Off, AnimationLevel.Medium, AnimationLevel.Maximum })
+            foreach (var speed in new[] { .5, 1, 2 })
+            {
+                systemMotion = speed != 1;
+                settings = new() { Theme = theme, AnimationLevel = level, MotionSpeed = speed };
+                Apply();
+                SettingsPanel.Visibility = Visibility.Collapsed;
+                CompactToggle.IsOn = false; AccordionToggle.IsOn = true;
+                SettingsPanel.Visibility = Visibility.Visible; Root.UpdateLayout(); await Task.Delay(220);
+                CheckToggle(CompactToggle); CheckToggle(AccordionToggle); count += 2;
+                CompactToggle.IsOn = true; AccordionToggle.IsOn = false;
+                await Task.Delay(220);
+                CheckToggle(CompactToggle); CheckToggle(AccordionToggle); count += 2;
+            }
+            await Snapshot("toggle-switches.png");
+            return count;
+        }
+        finally { CompactToggle.Toggled -= Preview; ThemeService.Apply(Root, new()); }
+    }
+    private static void CheckToggle(ToggleSwitch control)
+    {
+        var visuals = Descendants(control).OfType<FrameworkElement>().Where(e => e.Name.Length > 0)
+            .GroupBy(e => e.Name).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var onLabel = visuals["OnContentPresenter"]; var offLabel = visuals["OffContentPresenter"];
+        var onKnob = visuals["SwitchKnobOn"]; var offKnob = visuals["SwitchKnobOff"];
+        Check(control.IsOn ? onLabel.Opacity > .99 && offLabel.Opacity < .01 : offLabel.Opacity > .99 && onLabel.Opacity < .01,
+            $"Toggle {control.Header} shows overlapping/wrong labels (IsOn={control.IsOn}, on={onLabel.Opacity}, off={offLabel.Opacity}).");
+        Check(control.IsOn ? onKnob.Opacity > .99 && offKnob.Opacity < .01 : offKnob.Opacity > .99 && onKnob.Opacity < .01,
+            $"Toggle {control.Header} shows overlapping/wrong knobs.");
+    }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject item)
     {
         for (var i = 0; i < VisualTreeHelper.GetChildrenCount(item); i++)

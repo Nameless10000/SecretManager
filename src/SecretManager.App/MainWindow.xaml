@@ -137,8 +137,9 @@
       <TextBlock Text="Движение и отклик" FontSize="16" FontWeight="SemiBold"/>
       <ComboBox x:Name="AnimationChoice" Header="Количество анимаций" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Отключить анимации</x:String><x:String>Умеренные</x:String><x:String>Максимальная анимированность</x:String></ComboBox>
       <TextBlock Text="Максимум: пружины, появление карточек и анимация наведения. Системная настройка отключения движения имеет приоритет." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
-      <TextBlock Text="Скорость анимаций · от плавной к быстрой" FontSize="12"/>
+      <TextBlock Text="Скорость отклика при наведении и нажатии" FontSize="12"/>
       <Slider x:Name="MotionSpeedChoice" Minimum="0.5" Maximum="2" StepFrequency="0.1" ValueChanged="AppearanceSlider_Changed"/>
+      <TextBlock Text="Раскрытие карточек и появление содержимого имеют постоянную скорость. Ползунок меняет плавность подсветки и пружинного отклика." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
       <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
       <TextBlock Text="Безопасность и вход" FontSize="16" FontWeight="SemiBold"/>
       <Button Content="Сменить мастер-пароль" Click="ChangePassword_Click" HorizontalAlignment="Stretch"/>

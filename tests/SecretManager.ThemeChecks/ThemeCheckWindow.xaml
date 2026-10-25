@@ -43,7 +43,8 @@
     <TextBlock Text="Цвета меню, панели, полей, кнопок и текста должны принадлежать одной теме." TextWrapping="Wrap" Foreground="{ThemeResource VaultSecondaryTextBrush}" FontSize="12"/>
     <NumberBox Header="Размер текста" Value="14" SpinButtonPlacementMode="Compact"/>
     <Slider Header="Скругление" Minimum="0" Maximum="28" Value="14"/>
-    <ToggleSwitch Header="Компактный список" IsOn="True"/>
+    <ToggleSwitch x:Name="CompactToggle" Header="Компактный список" IsOn="True"/>
+    <ToggleSwitch x:Name="AccordionToggle" Header="Только одна раскрытая ассоциация" IsOn="False"/>
     <Button Content="Сохранить настройки" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Stretch"/>
     <InfoBar x:Name="SuccessInfo" IsOpen="True" IsClosable="False" Severity="Success" Message="Значки WinUI сохранены"/>
    </StackPanel>

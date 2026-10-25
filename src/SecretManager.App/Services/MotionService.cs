@@ -2,7 +2,6 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using SecretManager.Core.Models;
 using Windows.UI.ViewManagement;
 
@@ -12,8 +11,6 @@ public sealed class MotionService(Func<AppSettings> settings)
 {
     private readonly ConditionalWeakTable<FrameworkElement, object> wired = new();
     private readonly ConditionalWeakTable<FrameworkElement, object> translated = new();
-    private static readonly ConditionalWeakTable<Storyboard, NativeTiming> nativeTimings = new();
-    private sealed record NativeTiming(Duration Duration, double SpeedRatio);
     private readonly UISettings system = new();
     private readonly Func<bool>? systemAnimations;
     internal MotionService(Func<AppSettings> settings, Func<bool> systemAnimations) : this(settings) => this.systemAnimations = systemAnimations;
@@ -25,21 +22,9 @@ public sealed class MotionService(Func<AppSettings> settings)
         if (root is ContentPresenter presenter) presenter.BackgroundTransition = transition;
         if (root is Panel panel) panel.BackgroundTransition = transition;
         if (root is Border border) border.BackgroundTransition = transition;
-        if (root is FrameworkElement stateRoot)
-        {
-            foreach (var group in VisualStateManager.GetVisualStateGroups(stateRoot))
-            {
-                foreach (var state in group.States)
-                    if (state.Storyboard is { } storyboard)
-                    {
-                        var original = nativeTimings.GetValue(storyboard, s => new(s.Duration, s.SpeedRatio));
-                        // Disable with a real zero duration. A huge SpeedRatio makes
-                        // native WinUI timelines fail-fast during window teardown.
-                        storyboard.SpeedRatio = original.SpeedRatio * (Enabled ? settings().MotionSpeed : 1);
-                        storyboard.Duration = Enabled ? original.Duration : new Duration(TimeSpan.Zero);
-                    }
-            }
-        }
+        // WinUI visual-state storyboards also apply labels, knob positions and
+        // visibility. Keep their native timing intact, including when effects are
+        // off; rewriting a running state timeline can leave stale UI state.
         if (root is FrameworkElement element && (root is Button || root is Expander) && !wired.TryGetValue(element, out _))
         {
             wired.Add(element, new object());
@@ -69,14 +54,14 @@ public sealed class MotionService(Func<AppSettings> settings)
         var visual = ElementCompositionPreview.GetElementVisual(element);
         var fade = visual.Compositor.CreateScalarKeyFrameAnimation();
         fade.InsertKeyFrame(0, 0); fade.InsertKeyFrame(1, 1);
-        fade.Duration = TimeSpan.FromMilliseconds(220 / settings().MotionSpeed);
-        fade.DelayTime = TimeSpan.FromMilliseconds(Math.Min(stagger, 6) * 35 / settings().MotionSpeed);
+        fade.Duration = TimeSpan.FromMilliseconds(220);
+        fade.DelayTime = TimeSpan.FromMilliseconds(Math.Min(stagger, 6) * 35);
         visual.StartAnimation("Opacity", fade);
         if (settings().AnimationLevel == AnimationLevel.Maximum)
         {
             var movement = visual.Compositor.CreateVector3KeyFrameAnimation();
             movement.InsertKeyFrame(0, new Vector3(0, 10, 0)); movement.InsertKeyFrame(1, Vector3.Zero);
-            movement.Duration = TimeSpan.FromMilliseconds(320 / settings().MotionSpeed);
+            movement.Duration = TimeSpan.FromMilliseconds(320);
             ElementCompositionPreview.SetIsTranslationEnabled(element, true);
             visual.Properties.InsertVector3("Translation", Vector3.Zero);
             if (!translated.TryGetValue(element, out _)) translated.Add(element, new object());
