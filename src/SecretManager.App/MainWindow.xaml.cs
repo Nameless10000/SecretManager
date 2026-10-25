@@ -541,6 +541,8 @@ public sealed partial class MainWindow : Window
         exiting = true;
         ViewModel.Lock();
         await clipboard.ClearOwnedAsync();
+        // WinUI #11653: a focused text/password input can crash framework teardown.
+        UnlockButton.IsEnabled = true; UnlockButton.Focus(FocusState.Programmatic);
         Close();
     }
     private void Window_Closed(object sender, WindowEventArgs args)
@@ -549,6 +551,6 @@ public sealed partial class MainWindow : Window
         ViewModel.SessionChanged -= UpdateSession; ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         activeDialog?.Hide(); ViewModel.Lock(); ViewModel.Dispose();
         _ = clipboard.ClearOwnedAsync(); clipboard.Dispose(); tray.Dispose();
-        Microsoft.UI.Xaml.Application.Current.Exit();
+        // The last Window.Close ends the application; do not start XAML shutdown twice.
     }
 }

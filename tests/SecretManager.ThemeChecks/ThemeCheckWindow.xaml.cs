@@ -87,6 +87,9 @@ public sealed partial class ThemeCheckWindow : Window
             var attachmentChecks = await AttachmentChecks.RunAsync(Card, output, Snapshot);
             // Detach decoded images before tearing down the XAML/composition tree.
             Card.Content = null; Root.UpdateLayout(); await NextFrame(); await NextFrame();
+            var textInput = Descendants(Root).OfType<TextBox>().First();
+            textInput.Focus(FocusState.Programmatic);
+            Check(AccentButton.Focus(FocusState.Programmatic), "Could not clear text-input focus before WinUI shutdown.");
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 3, NativeControls = true, IconFonts = true, HoverGutters = true,
                 ToastOverlay = true, ToastAutoDismiss = true, HoverBrushTransitions = true, AttachmentChecks = attachmentChecks }));
@@ -101,6 +104,7 @@ public sealed partial class ThemeCheckWindow : Window
         finally
         {
             File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Before Window.Close");
+            AccentButton.Focus(FocusState.Programmatic);
             Close(); // Closing the last window shuts down WinUI; do not request Exit a second time.
             File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Window.Close returned");
         }
