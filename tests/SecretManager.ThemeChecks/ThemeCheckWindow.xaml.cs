@@ -85,6 +85,11 @@ public sealed partial class ThemeCheckWindow : Window
             var motionSettings = new AppSettings { AnimationLevel = AnimationLevel.Maximum };
             var motion = new MotionService(() => motionSettings, () => true);
             motion.Wire(Root);
+            var nativeVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(SemanticIcon);
+            nativeVisual.Opacity = .4f;
+            motion.Reset(Root);
+            Check(Math.Abs(nativeVisual.Opacity - .4f) < .001, "Reset overwrote an unowned native visual's opacity.");
+            nativeVisual.Opacity = 1;
             var iconSurface = Descendants(AccentButton).OfType<ContentPresenter>().First();
             Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(180) : iconSurface.BackgroundTransition is null, "Hover background transition ignores the system motion setting.");
             var expanderContent = Descendants(Card).OfType<Border>().Single(b => b.Name == "ExpanderContent");

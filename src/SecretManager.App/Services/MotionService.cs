@@ -10,6 +10,8 @@ namespace SecretManager.App.Services;
 public sealed class MotionService(Func<AppSettings> settings)
 {
     private readonly ConditionalWeakTable<FrameworkElement, object> wired = new();
+    private readonly ConditionalWeakTable<FrameworkElement, object> scaled = new();
+    private readonly ConditionalWeakTable<FrameworkElement, object> faded = new();
     private readonly ConditionalWeakTable<FrameworkElement, object> translated = new();
     private readonly UISettings system = new();
     private readonly Func<bool>? systemAnimations;
@@ -41,6 +43,7 @@ public sealed class MotionService(Func<AppSettings> settings)
         if (!element.IsLoaded || element.XamlRoot is null || !Enabled || settings().AnimationLevel != AnimationLevel.Maximum) return;
         if (element is Expander && value > 1) value = MotionGeometry.CardHoverScale(element.ActualWidth);
         var visual = ElementCompositionPreview.GetElementVisual(element);
+        scaled.GetValue(element, _ => new object());
         visual.CenterPoint = new Vector3((float)element.ActualWidth / 2, (float)element.ActualHeight / 2, 0);
         var spring = visual.Compositor.CreateSpringVector3Animation();
         spring.FinalValue = new Vector3(value, value, 1);
@@ -52,6 +55,7 @@ public sealed class MotionService(Func<AppSettings> settings)
     {
         if (element.XamlRoot is null || !Enabled) return;
         var visual = ElementCompositionPreview.GetElementVisual(element);
+        faded.GetValue(element, _ => new object());
         var fade = visual.Compositor.CreateScalarKeyFrameAnimation();
         fade.InsertKeyFrame(0, 0); fade.InsertKeyFrame(1, 1);
         fade.Duration = TimeSpan.FromMilliseconds(220);
@@ -72,14 +76,20 @@ public sealed class MotionService(Func<AppSettings> settings)
     {
         if (root is FrameworkElement element && element.XamlRoot is not null)
         {
-            var visual = ElementCompositionPreview.GetElementVisual(element);
-            visual.StopAnimation("Scale"); visual.StopAnimation("Opacity");
-            if (translated.TryGetValue(element, out _))
+            var ownsScale = scaled.TryGetValue(element, out _);
+            var ownsOpacity = faded.TryGetValue(element, out _);
+            var ownsTranslation = translated.TryGetValue(element, out _);
+            if (ownsScale || ownsOpacity || ownsTranslation)
             {
-                visual.StopAnimation("Translation");
-                visual.Properties.InsertVector3("Translation", Vector3.Zero);
+                var visual = ElementCompositionPreview.GetElementVisual(element);
+                if (ownsScale) { visual.StopAnimation("Scale"); visual.Scale = Vector3.One; scaled.Remove(element); }
+                if (ownsOpacity) { visual.StopAnimation("Opacity"); visual.Opacity = 1; faded.Remove(element); }
+                if (ownsTranslation)
+                {
+                    visual.StopAnimation("Translation"); visual.Properties.InsertVector3("Translation", Vector3.Zero);
+                    translated.Remove(element);
+                }
             }
-            visual.Scale = Vector3.One; visual.Opacity = 1;
         }
         for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) Reset(VisualTreeHelper.GetChild(root, i));
     }
