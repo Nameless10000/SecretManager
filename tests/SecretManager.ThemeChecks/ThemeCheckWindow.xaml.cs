@@ -103,10 +103,15 @@ public sealed partial class ThemeCheckWindow : Window
         }
         finally
         {
-            File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Before Window.Close");
-            AccentButton.Focus(FocusState.Programmatic);
-            Close(); // Closing the last window shuts down WinUI; do not request Exit a second time.
-            File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Window.Close returned");
+            // Let the async Loaded handler complete before destroying its dispatcher/XAML island.
+            File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Close queued");
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                AccentButton.Focus(FocusState.Programmatic);
+                File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Before Window.Close");
+                Close();
+                File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Window.Close returned");
+            });
         }
     }
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }

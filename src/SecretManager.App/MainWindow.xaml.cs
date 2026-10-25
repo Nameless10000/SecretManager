@@ -542,8 +542,8 @@ public sealed partial class MainWindow : Window
         ViewModel.Lock();
         await clipboard.ClearOwnedAsync();
         // WinUI #11653: a focused text/password input can crash framework teardown.
-        UnlockButton.IsEnabled = true; UnlockButton.Focus(FocusState.Programmatic);
-        Close();
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        { UnlockButton.IsEnabled = true; UnlockButton.Focus(FocusState.Programmatic); Close(); });
     }
     private void Window_Closed(object sender, WindowEventArgs args)
     {
