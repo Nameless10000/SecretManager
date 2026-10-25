@@ -46,6 +46,11 @@ dotnet test tests/SecretManager.Core.Tests/SecretManager.Core.Tests.csproj -c Re
 dotnet build src/SecretManager.App/SecretManager.App.csproj -c Release -p:Platform=x64 --no-restore
 ```
 
+`./scripts/Test-Themes.ps1` запускает отдельный WinUI-стенд с синтетическими данными:
+проверяет 64 перехода между палитрами, сохранение значков, отступы анимации и уведомление
+поверх списка с исчезновением через 2 секунды. PNG и отчёт: `artifacts/theme-checks`.
+Пользовательское хранилище стенд не открывает. Эти проверки также входят в сборку установщика.
+
 Для установщика нужен [Inno Setup 6/7](https://jrsoftware.org/isdl.php):
 
 ```powershell
