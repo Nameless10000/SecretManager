@@ -10,52 +10,32 @@ try {
     $output = Join-Path $projectRoot 'artifacts\theme-checks'
     New-Item -ItemType Directory -Force -Path $output | Out-Null
     for ($iteration = 1; $iteration -le $Iterations; $iteration++) {
-    Write-Output "Native WinUI process check $iteration/$Iterations"
-    foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt', 'native-error.txt')) {
-        $previous = Join-Path $output $name
-        if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous }
-    }
-    $env:SECRETMANAGER_THEME_CHECK_OUTPUT = $output
-    $checkExecutable = Join-Path $projectRoot 'tests\SecretManager.ThemeChecks\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\SecretManager.ThemeChecks.exe'
-    $process = Start-Process -FilePath $checkExecutable -WindowStyle Hidden -PassThru
-    # Keep the native process handle while it is alive; some PowerShell/.NET versions
-    # otherwise lose access to ExitCode after a short-lived WinUI process terminates.
-    $null = $process.Handle
-    if (-not $process.WaitForExit(45000)) { $process.Kill(); throw 'Theme checks exceeded 45 seconds.' }
-    $process.WaitForExit()
-    $exitCode = $process.ExitCode
-    $report = Join-Path $output 'result.json'
-    if (-not (Test-Path -LiteralPath $report)) { throw 'Theme checks produced no report.' }
-    $result = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
-    if ($exitCode -ne 0 -or -not $result.Passed) {
-        $stage = Join-Path $output 'teardown-stage.txt'
-        if (Test-Path -LiteralPath $stage) { Get-Content -LiteralPath $stage | Write-Output }
-        $nativeError = Join-Path $output 'native-error.txt'
-        if (Test-Path -LiteralPath $nativeError) { Get-Content -LiteralPath $nativeError | Write-Output }
-        try {
-            Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-5);Level=2} -ErrorAction Stop |
-                Where-Object Message -Like '*SecretManager.ThemeChecks*' | Select-Object -First 2 -ExpandProperty Message | Write-Output
-        } catch { Write-Output 'Windows crash diagnostics unavailable.' }
-        if ($env:GITHUB_ACTIONS -eq 'true') {
-            foreach ($scope in @('baseline', 'motion', 'attachments')) {
-                $scopeOutput = Join-Path $output $scope
-                New-Item -ItemType Directory -Force -Path $scopeOutput | Out-Null
-                $env:SECRETMANAGER_THEME_CHECK_OUTPUT = $scopeOutput
-                $env:SECRETMANAGER_CHECK_SCOPE = $scope
-                $probe = Start-Process -FilePath $checkExecutable -WindowStyle Hidden -PassThru
-                $null = $probe.Handle
-                if ($probe.WaitForExit(45000)) { $probe.WaitForExit(); Write-Output "Isolation $scope exit: $($probe.ExitCode)" }
-                else { $probe.Kill(); Write-Output "Isolation $scope timed out" }
-                Get-Content (Join-Path $scopeOutput 'result.json') -ErrorAction Continue | Write-Output
-            }
-            Remove-Item Env:SECRETMANAGER_CHECK_SCOPE -ErrorAction SilentlyContinue
-            $env:SECRETMANAGER_THEME_CHECK_OUTPUT = $output
-            try { & (Join-Path $PSScriptRoot 'Trace-WinUiFailure.ps1') -Executable $checkExecutable -Output $output }
-            catch { Write-Output "Native dump analysis failed: $_" }
+        Write-Output "Native WinUI process check $iteration/$Iterations"
+        foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt')) {
+            $previous = Join-Path $output $name
+            if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous }
         }
-        throw ("Theme process exit code: $exitCode`n" + ($result | ConvertTo-Json -Depth 4))
-    }
-    $result | ConvertTo-Json
+        $env:SECRETMANAGER_THEME_CHECK_OUTPUT = $output
+        $checkExecutable = Join-Path $projectRoot 'tests\SecretManager.ThemeChecks\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\SecretManager.ThemeChecks.exe'
+        $process = Start-Process -FilePath $checkExecutable -WindowStyle Hidden -PassThru
+        # Retain the process handle so its exit code stays available after shutdown.
+        $null = $process.Handle
+        if (-not $process.WaitForExit(45000)) { $process.Kill(); throw 'Theme checks exceeded 45 seconds.' }
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        $report = Join-Path $output 'result.json'
+        if (-not (Test-Path -LiteralPath $report)) { throw 'Theme checks produced no report.' }
+        $result = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
+        if ($exitCode -ne 0 -or -not $result.Passed) {
+            $stage = Join-Path $output 'teardown-stage.txt'
+            if (Test-Path -LiteralPath $stage) { Get-Content -LiteralPath $stage | Write-Output }
+            try {
+                Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-5);Level=2} -ErrorAction Stop |
+                    Where-Object Message -Like '*SecretManager.ThemeChecks*' | Select-Object -First 2 -ExpandProperty Message | Write-Output
+            } catch { Write-Output 'Windows crash diagnostics unavailable.' }
+            throw ("Theme process exit code: $exitCode`n" + ($result | ConvertTo-Json -Depth 4))
+        }
+        $result | ConvertTo-Json
     }
 }
 finally { Remove-Item Env:SECRETMANAGER_THEME_CHECK_OUTPUT -ErrorAction SilentlyContinue; Pop-Location }

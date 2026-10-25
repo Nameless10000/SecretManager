@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using SecretManager.Core.Models;
 using Windows.UI.ViewManagement;
 
@@ -11,8 +12,12 @@ public sealed class MotionService(Func<AppSettings> settings)
 {
     private readonly ConditionalWeakTable<FrameworkElement, object> wired = new();
     private readonly ConditionalWeakTable<FrameworkElement, object> translated = new();
+    private static readonly ConditionalWeakTable<Storyboard, NativeTiming> nativeTimings = new();
+    private sealed record NativeTiming(Duration Duration, double SpeedRatio);
     private readonly UISettings system = new();
-    public bool Enabled => settings().AnimationLevel != AnimationLevel.Off && system.AnimationsEnabled;
+    private readonly Func<bool>? systemAnimations;
+    internal MotionService(Func<AppSettings> settings, Func<bool> systemAnimations) : this(settings) => this.systemAnimations = systemAnimations;
+    public bool Enabled => settings().AnimationLevel != AnimationLevel.Off && (systemAnimations?.Invoke() ?? system.AnimationsEnabled);
     public void Wire(DependencyObject root)
     {
         var transition = Enabled ? new BrushTransition { Duration = TimeSpan.FromMilliseconds(
@@ -26,7 +31,13 @@ public sealed class MotionService(Func<AppSettings> settings)
             {
                 foreach (var state in group.States)
                     if (state.Storyboard is { } storyboard)
-                        storyboard.SpeedRatio = Enabled ? settings().MotionSpeed : 100_000;
+                    {
+                        var original = nativeTimings.GetValue(storyboard, s => new(s.Duration, s.SpeedRatio));
+                        // Disable with a real zero duration. A huge SpeedRatio makes
+                        // native WinUI timelines fail-fast during window teardown.
+                        storyboard.SpeedRatio = original.SpeedRatio * (Enabled ? settings().MotionSpeed : 1);
+                        storyboard.Duration = Enabled ? original.Duration : new Duration(TimeSpan.Zero);
+                    }
             }
         }
         if (root is FrameworkElement element && (root is Button || root is Expander) && !wired.TryGetValue(element, out _))

@@ -75,9 +75,11 @@ public sealed partial class ThemeCheckWindow : Window
             await Snapshot("toast-overlay.png");
             await Task.Delay(2200);
             Check(!Toast.IsOpen && Toast.Message == "", "Toast did not dismiss after two seconds.");
-            var scope = Environment.GetEnvironmentVariable("SECRETMANAGER_CHECK_SCOPE") ?? "full";
-            if (scope is "full" or "motion")
-            {
+            var nativeTimings = Descendants(Root).OfType<FrameworkElement>()
+                .SelectMany(VisualStateManager.GetVisualStateGroups).SelectMany(g => g.States)
+                .Select(s => s.Storyboard).OfType<Microsoft.UI.Xaml.Media.Animation.Storyboard>().Distinct()
+                .ToDictionary(s => s, s => (s.Duration, s.SpeedRatio));
+            Check(nativeTimings.Count > 0, "Native visual-state timelines were not found.");
             var motionSettings = new AppSettings { AnimationLevel = AnimationLevel.Maximum };
             var motion = new MotionService(() => motionSettings);
             motion.Wire(Root);
@@ -85,10 +87,18 @@ public sealed partial class ThemeCheckWindow : Window
             Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(180) : iconSurface.BackgroundTransition is null, "Hover background transition ignores the system motion setting.");
             motionSettings = motionSettings with { AnimationLevel = AnimationLevel.Off }; motion.Wire(Root);
             Check(iconSurface.BackgroundTransition is null, "Disabled animations still transition the hover background.");
+            Check(nativeTimings.All(p => p.Key.Duration.HasTimeSpan && p.Key.Duration.TimeSpan == TimeSpan.Zero &&
+                p.Key.SpeedRatio == p.Value.SpeedRatio), "Disabled native timelines must use zero duration without extreme playback rates.");
             motionSettings = motionSettings with { AnimationLevel = AnimationLevel.Medium, MotionSpeed = 2 }; motion.Wire(Root);
             Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(60) : iconSurface.BackgroundTransition is null, "Hover transition ignores animation speed or system settings.");
-            }
-            var attachmentChecks = scope is "full" or "attachments" ? await AttachmentChecks.RunAsync(Card, output, Snapshot) : 0;
+            Check(nativeTimings.All(p => motion.Enabled ? p.Key.Duration.Equals(p.Value.Duration) && p.Key.SpeedRatio == p.Value.SpeedRatio * 2 :
+                p.Key.Duration.HasTimeSpan && p.Key.Duration.TimeSpan == TimeSpan.Zero), "Re-enabling animation did not restore native timing.");
+            var noSystemMotion = new MotionService(() => motionSettings, () => false);
+            noSystemMotion.Wire(Root);
+            Check(!noSystemMotion.Enabled && iconSurface.BackgroundTransition is null, "Reduced system motion must disable custom animation.");
+            Check(nativeTimings.All(p => p.Key.Duration.HasTimeSpan && p.Key.Duration.TimeSpan == TimeSpan.Zero &&
+                p.Key.SpeedRatio == p.Value.SpeedRatio), "Reduced system motion must also disable native timelines safely.");
+            var attachmentChecks = await AttachmentChecks.RunAsync(Card, output, Snapshot);
             // Detach decoded images before tearing down the XAML/composition tree.
             Card.Content = null; Root.UpdateLayout(); await NextFrame(); await NextFrame();
             var textInput = Descendants(Root).OfType<TextBox>().First();
@@ -96,7 +106,7 @@ public sealed partial class ThemeCheckWindow : Window
             Check(AccentButton.Focus(FocusState.Programmatic), "Could not clear text-input focus before WinUI shutdown.");
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 3, NativeControls = true, IconFonts = true, HoverGutters = true,
-                ToastOverlay = true, ToastAutoDismiss = true, Scope = scope, HoverBrushTransitions = scope is "full" or "motion", AttachmentChecks = attachmentChecks }));
+                ToastOverlay = true, ToastAutoDismiss = true, HoverBrushTransitions = true, SystemMotionDisabled = true, AttachmentChecks = attachmentChecks }));
             Environment.ExitCode = 0;
         }
         catch (Exception ex)
