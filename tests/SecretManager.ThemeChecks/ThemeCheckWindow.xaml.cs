@@ -16,6 +16,7 @@ public sealed partial class ThemeCheckWindow : Window
     public ThemeCheckWindow()
     {
         InitializeComponent(); AppWindow.Resize(new SizeInt32(1400, 900));
+        Closed += (_, _) => File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Window.Closed");
         Root.Loaded += async (_, _) => await RunChecks();
     }
     private async Task RunChecks()
@@ -84,6 +85,8 @@ public sealed partial class ThemeCheckWindow : Window
             motionSettings = motionSettings with { AnimationLevel = AnimationLevel.Medium, MotionSpeed = 2 }; motion.Wire(Root);
             Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(60) : iconSurface.BackgroundTransition is null, "Hover transition ignores animation speed or system settings.");
             var attachmentChecks = await AttachmentChecks.RunAsync(Card, output, Snapshot);
+            // Detach decoded images before tearing down the XAML/composition tree.
+            Card.Content = null; Root.UpdateLayout(); await NextFrame(); await NextFrame();
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 3, NativeControls = true, IconFonts = true, HoverGutters = true,
                 ToastOverlay = true, ToastAutoDismiss = true, HoverBrushTransitions = true, AttachmentChecks = attachmentChecks }));
@@ -95,7 +98,12 @@ public sealed partial class ThemeCheckWindow : Window
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new { Passed = false, Error = ex.ToString() }));
             Environment.ExitCode = 1;
         }
-        finally { Close(); Microsoft.UI.Xaml.Application.Current.Exit(); }
+        finally
+        {
+            File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Before Window.Close");
+            Close(); // Closing the last window shuts down WinUI; do not request Exit a second time.
+            File.WriteAllText(Path.Combine(output, "teardown-stage.txt"), "Window.Close returned");
+        }
     }
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject item)

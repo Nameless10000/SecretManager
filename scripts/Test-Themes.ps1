@@ -9,7 +9,7 @@ try {
     }
     $output = Join-Path $projectRoot 'artifacts\theme-checks'
     New-Item -ItemType Directory -Force -Path $output | Out-Null
-    foreach ($name in @('result.json', 'failure.png')) {
+    foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt')) {
         $previous = Join-Path $output $name
         if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous }
     }
@@ -25,7 +25,15 @@ try {
     $report = Join-Path $output 'result.json'
     if (-not (Test-Path -LiteralPath $report)) { throw 'Theme checks produced no report.' }
     $result = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
-    if ($exitCode -ne 0 -or -not $result.Passed) { throw ("Theme process exit code: $exitCode`n" + ($result | ConvertTo-Json -Depth 4)) }
+    if ($exitCode -ne 0 -or -not $result.Passed) {
+        $stage = Join-Path $output 'teardown-stage.txt'
+        if (Test-Path -LiteralPath $stage) { Get-Content -LiteralPath $stage | Write-Output }
+        try {
+            Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-5);Level=2} -ErrorAction Stop |
+                Where-Object Message -Like '*SecretManager.ThemeChecks*' | Select-Object -First 2 -ExpandProperty Message | Write-Output
+        } catch { Write-Output 'Windows crash diagnostics unavailable.' }
+        throw ("Theme process exit code: $exitCode`n" + ($result | ConvertTo-Json -Depth 4))
+    }
     $result | ConvertTo-Json
 }
 finally { Remove-Item Env:SECRETMANAGER_THEME_CHECK_OUTPUT -ErrorAction SilentlyContinue; Pop-Location }

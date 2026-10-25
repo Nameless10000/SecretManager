@@ -263,6 +263,7 @@ public sealed partial class MainWindow : Window
         if (existing?.Kind == FieldKind.Secret) secret.Password = existing.Value;
         await SwitchKind();
         if (existing?.Kind is FieldKind.Image or FieldKind.File) await attachment.SetExistingAsync(existing);
+        RequireSession(captured);
         var dialog = Dialog(existing is null ? "Добавить поле" : "Редактирование поля", panel, "Сохранить");
         attachment.StateChanged += () => dialog.IsPrimaryButtonEnabled = !attachment.IsBusy;
         var pasteShortcut = new KeyboardAccelerator { Key = VirtualKey.V, Modifiers = VirtualKeyModifiers.Control };
