@@ -8,7 +8,7 @@ Invoke-WebRequest https://download.sysinternals.com/files/Procdump.zip -OutFile 
 Expand-Archive (Join-Path $tools 'procdump.zip') (Join-Path $tools 'procdump') -Force
 $dumpFolder = Join-Path $Output 'native-dumps'
 New-Item -ItemType Directory -Force -Path $dumpFolder | Out-Null
-& (Join-Path $tools 'procdump\procdump64.exe') -accepteula -e -ma -x $dumpFolder $Executable
+& (Join-Path $tools 'procdump\procdump64.exe') -accepteula -e 1 -f 'C000027B,E0434352' -ma -x $dumpFolder $Executable
 $dump = Get-ChildItem -LiteralPath $dumpFolder -Filter '*.dmp' | Select-Object -First 1
 if (-not $dump) { Write-Output 'Diagnostic rerun produced no crash dump.'; return }
 $debugger = 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe'

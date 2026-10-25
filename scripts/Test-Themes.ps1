@@ -37,6 +37,19 @@ try {
                 Where-Object Message -Like '*SecretManager.ThemeChecks*' | Select-Object -First 2 -ExpandProperty Message | Write-Output
         } catch { Write-Output 'Windows crash diagnostics unavailable.' }
         if ($env:GITHUB_ACTIONS -eq 'true') {
+            foreach ($scope in @('baseline', 'motion', 'attachments')) {
+                $scopeOutput = Join-Path $output $scope
+                New-Item -ItemType Directory -Force -Path $scopeOutput | Out-Null
+                $env:SECRETMANAGER_THEME_CHECK_OUTPUT = $scopeOutput
+                $env:SECRETMANAGER_CHECK_SCOPE = $scope
+                $probe = Start-Process -FilePath $checkExecutable -WindowStyle Hidden -PassThru
+                $null = $probe.Handle
+                if ($probe.WaitForExit(45000)) { $probe.WaitForExit(); Write-Output "Isolation $scope exit: $($probe.ExitCode)" }
+                else { $probe.Kill(); Write-Output "Isolation $scope timed out" }
+                Get-Content (Join-Path $scopeOutput 'result.json') -ErrorAction Continue | Write-Output
+            }
+            Remove-Item Env:SECRETMANAGER_CHECK_SCOPE -ErrorAction SilentlyContinue
+            $env:SECRETMANAGER_THEME_CHECK_OUTPUT = $output
             try { & (Join-Path $PSScriptRoot 'Trace-WinUiFailure.ps1') -Executable $checkExecutable -Output $output }
             catch { Write-Output "Native dump analysis failed: $_" }
         }
