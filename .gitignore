@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+TestResults/
+artifacts/
+.tools/
+*.user
+*.suo
+*.db
+*.db-*
+*.sqlite*
+*.smvault
+*.tmp
+*.log
+local.settings.json
+NuGet.Config.local
