@@ -38,6 +38,7 @@ public sealed class MotionService(Func<AppSettings> settings)
     private void Scale(FrameworkElement element, float value, bool hover)
     {
         if (!Enabled || settings().AnimationLevel != AnimationLevel.Maximum) return;
+        if (element is Expander && value > 1) value = MotionGeometry.CardHoverScale(element.ActualWidth);
         var visual = ElementCompositionPreview.GetElementVisual(element);
         visual.CenterPoint = new Vector3((float)element.ActualWidth / 2, (float)element.ActualHeight / 2, 0);
         var spring = visual.Compositor.CreateSpringVector3Animation();

@@ -34,6 +34,7 @@ public sealed partial class MainWindow : Window
     private bool loadingSettings = true;
     private bool isFocused = true;
     private bool navigationWasOpen;
+    private bool applyingAppearance;
     private int epoch;
     private string accent = "#5978FF";
     private string background = "#171B27";
@@ -60,6 +61,10 @@ public sealed partial class MainWindow : Window
         AppWindow.Closing += AppWindow_Closing;
         Closed += Window_Closed;
         Root.Loaded += (_, _) => { UpdateSession(); ApplyAppearance(); motion.Wire(Root); motion.Enter(LoginView); LoginPassword.Focus(FocusState.Programmatic); };
+        Root.ActualThemeChanged += (_, _) =>
+        {
+            if (!applyingAppearance && (appearancePreview ?? ViewModel.Settings).Theme == AppTheme.System) ApplyAppearance();
+        };
         timer.Tick += (_, _) => CheckFocusTimeout(); timer.Start();
         SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
         var lockKey = new KeyboardAccelerator { Key = VirtualKey.L, Modifiers = VirtualKeyModifiers.Control };
@@ -88,6 +93,7 @@ public sealed partial class MainWindow : Window
         tray.Update(ViewModel.IsUnlocked);
         if (!ViewModel.IsUnlocked)
         {
+            Notice.Hide();
             activeDialog?.Hide(); activeDialog = null;
             SettingsPanel.Visibility = Visibility.Collapsed;
             appearancePreview = null;
@@ -138,8 +144,7 @@ public sealed partial class MainWindow : Window
     private void Notify(string message, bool error = false)
     {
         ViewModel.Status = message;
-        Notice.Message = message; Notice.Severity = error ? InfoBarSeverity.Error : InfoBarSeverity.Success;
-        Notice.IsOpen = true; motion.Enter(Notice);
+        Notice.Show(message, error); motion.Enter(Notice);
     }
 
     private async void Unlock_Click(object sender, RoutedEventArgs e) => await Run(async () =>
@@ -152,12 +157,19 @@ public sealed partial class MainWindow : Window
     private void LoginPassword_KeyDown(object sender, KeyRoutedEventArgs e)
     { if (e.Key == VirtualKey.Enter) { Unlock_Click(sender, new RoutedEventArgs()); e.Handled = true; } }
 
-    private ContentDialog Dialog(string title, object content, string? primary = null) => new()
+    private ContentDialog Dialog(string title, object content, string? primary = null)
     {
+        var dialog = new ContentDialog
+        {
         XamlRoot = Root.XamlRoot, Title = title, Content = content, PrimaryButtonText = primary ?? "",
         CloseButtonText = primary is null ? "Закрыть" : "Отмена", DefaultButton = primary is null ? ContentDialogButton.Close : ContentDialogButton.Primary,
         RequestedTheme = Root.ActualTheme
-    };
+        };
+        var resources = new ThemeResources();
+        resources.Apply(ThemePalette.Resolve(appearancePreview ?? ViewModel.Settings, Root.ActualTheme == ElementTheme.Dark));
+        dialog.Resources.MergedDictionaries.Add(resources);
+        return dialog;
+    }
     private async Task<ContentDialogResult> ShowDialog(ContentDialog dialog)
     {
         if (activeDialog is not null) throw new InvalidOperationException("Сначала закройте текущее окно.");
@@ -389,9 +401,24 @@ public sealed partial class MainWindow : Window
     };
     private void ApplyAppearance()
     {
+        if (applyingAppearance) return;
+        applyingAppearance = true;
+        try
+        {
         var settings = appearancePreview ?? ViewModel.Settings;
-        ThemeService.Apply(Root, settings);
+        var palette = ThemeService.Apply(Root, settings);
+        var titleBar = AppWindow.TitleBar;
+        titleBar.ButtonForegroundColor = ThemeService.ParseColor(palette.Foreground);
+        titleBar.ButtonInactiveForegroundColor = ThemeService.ParseColor(palette.Secondary);
+        titleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+        titleBar.ButtonHoverBackgroundColor = ThemeService.ParseColor(palette.ControlHover);
+        titleBar.ButtonHoverForegroundColor = ThemeService.ParseColor(palette.Foreground);
+        titleBar.ButtonPressedBackgroundColor = ThemeService.ParseColor(palette.Control);
+        titleBar.ButtonPressedForegroundColor = ThemeService.ParseColor(palette.Foreground);
         motion.Reset(Root); motion.Wire(Root);
+        }
+        finally { applyingAppearance = false; }
     }
     private void PreviewAppearance()
     {
@@ -463,7 +490,7 @@ public sealed partial class MainWindow : Window
         var text = new TextBlock
         {
             MaxWidth = 620, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
-            Text = "БЫСТРЫЙ СТАРТ\n\n1. Создайте мастер-пароль от 12 символов. Сохраните его в надёжном месте.\n2. Нажмите «Новая ассоциация»: например, GitHub или почта.\n3. Раскройте карточку → «Добавить поле». Полей может быть сколько угодно: логин, пароль, PublicKey, заметка, изображение или файл.\n4. Нажмите значение или кнопку копирования. Картинка одновременно копируется и открывается крупно.\n5. В меню слева → «Экспорт»: сохраните зашифрованный .smvault с отдельным паролем. На другом компьютере создайте локальное хранилище → «Импорт».\n\nПОИСК\n\nИщет только названия, без учёта регистра. Можно вводить начало слова или несколько слов: «почт личн». Кириллица поддерживается. Значения полей в поиск не попадают.\n\nКАК ЗАЩИЩЕНЫ ДАННЫЕ?\n\nSQLite содержит зашифрованные названия, описания, значения и вложения. Файлы сначала преобразуются в base64, затем шифруются. Base64 не является защитой. Экспорт проверяется по SHA-256, затем по тегу AES-GCM: пересчёт хешсуммы не позволяет подменить данные.\n\nЧТО ДЕЛАЕТ ИМПОРТ?\n\nОбъединяет ассоциации. При совпадении идентификатора или названия предложит оставить локальную, заменить её или сохранить обе. До разрешения всех конфликтов база не меняется. Настройки внешнего вида и блокировки устройства сохраняются локальными.\n\nЗАБЫЛ МАСТЕР-ПАРОЛЬ\n\nВосстановления нет. Создайте хранилище на другом устройстве и импортируйте резервную копию с известным паролем экспорта. Регулярно делайте резервные копии.\n\nБЛОКИРОВКА И ТРЕЙ\n\nCtrl+L блокирует сразу, Ctrl+F переводит фокус в поиск. По умолчанию окно блокируется после 5 минут без фокуса. Крестик скрывает окно в трей и блокирует сразу. Значок: жёлтый замок — заблокировано, зелёный — открыто. Левый клик возвращает окно; правый клик → «Выйти» завершает процесс. Таймеры и поведение крестика настраиваются, 0 отключает таймер. Блокировка Windows также блокирует хранилище.\n\nБУФЕР И ФАЙЛЫ\n\nБуфер очищается через 30 секунд, только если в нём остались наши данные. История и облачный буфер Windows отключены для этих копирований. При блокировке данные приложения в буфере очищаются. Другие программы могут успеть прочитать буфер раньше. Для копирования произвольного файла создаётся временный файл в LocalAppData, который удаляется при очистке. Вложение: до 10 МБ, снимок: до 64 МБ. Предпросмотр: PNG/JPEG до 40 Мп.\n\nТЕМЫ И АНИМАЦИИ\n\nНастройки справа: системная, светлая, тёмная, полночь, лесная или собственная тема. Собственная тема позволяет выбрать фон и акцент. Шрифт, размер, скругления и плотность доступны во всех темах. Изменения оформления видны сразу; «Сохранить настройки» закрепляет их. Закрытие панели отменяет несохранённый предпросмотр. Анимации: выключены, умеренные, максимальные; есть скорость. Системное отключение движения имеет приоритет.\n\nГДЕ ДАННЫЕ?\n\n%LocalAppData%\\SecretManager\\vault.db. Удаление программы сохраняет хранилище. Приложение работает локально и не отправляет ваши секреты в сеть. Почтового входа нет."
+            Text = "БЫСТРЫЙ СТАРТ\n\n1. Создайте мастер-пароль от 12 символов. Сохраните его в надёжном месте.\n2. Нажмите «Новая ассоциация»: например, GitHub или почта.\n3. Раскройте карточку → «Добавить поле». Полей может быть сколько угодно: логин, пароль, PublicKey, заметка, изображение или файл.\n4. Нажмите значение или кнопку копирования. Картинка одновременно копируется и открывается крупно.\n5. В меню слева → «Экспорт»: сохраните зашифрованный .smvault с отдельным паролем. На другом компьютере создайте локальное хранилище → «Импорт».\n\nПОИСК\n\nИщет только названия, без учёта регистра. Можно вводить начало слова или несколько слов. Достаточно совпадения любого из них: «Почта Mail» найдёт и «Почта 1», и «Mail». Кириллица поддерживается. Значения полей в поиск не попадают.\n\nКАК ЗАЩИЩЕНЫ ДАННЫЕ?\n\nSQLite содержит зашифрованные названия, описания, значения и вложения. Файлы сначала преобразуются в base64, затем шифруются. Base64 не является защитой. Экспорт проверяется по SHA-256, затем по тегу AES-GCM: пересчёт хешсуммы не позволяет подменить данные.\n\nЧТО ДЕЛАЕТ ИМПОРТ?\n\nОбъединяет ассоциации. При совпадении идентификатора или названия предложит оставить локальную, заменить её или сохранить обе. До разрешения всех конфликтов база не меняется. Настройки внешнего вида и блокировки устройства сохраняются локальными.\n\nЗАБЫЛ МАСТЕР-ПАРОЛЬ\n\nВосстановления нет. Создайте хранилище на другом устройстве и импортируйте резервную копию с известным паролем экспорта. Регулярно делайте резервные копии.\n\nБЛОКИРОВКА И ТРЕЙ\n\nCtrl+L блокирует сразу, Ctrl+F переводит фокус в поиск. По умолчанию окно блокируется после 5 минут без фокуса. Крестик скрывает окно в трей и блокирует сразу. Значок: жёлтый замок — заблокировано, зелёный — открыто. Левый клик возвращает окно; правый клик → «Выйти» завершает процесс. Таймеры и поведение крестика настраиваются, 0 отключает таймер. Блокировка Windows также блокирует хранилище.\n\nБУФЕР И ФАЙЛЫ\n\nБуфер очищается через 30 секунд, только если в нём остались наши данные. История и облачный буфер Windows отключены для этих копирований. При блокировке данные приложения в буфере очищаются. Другие программы могут успеть прочитать буфер раньше. Для копирования произвольного файла создаётся временный файл в LocalAppData, который удаляется при очистке. Вложение: до 10 МБ, снимок: до 64 МБ. Предпросмотр: PNG/JPEG до 40 Мп.\n\nТЕМЫ И АНИМАЦИИ\n\nНастройки справа: системная, светлая, тёмная, полночь, лесная или собственная тема. Собственная тема позволяет выбрать фон и акцент. Шрифт, размер, скругления и плотность доступны во всех темах. Изменения оформления видны сразу; «Сохранить настройки» закрепляет их. Закрытие панели отменяет несохранённый предпросмотр. Анимации: выключены, умеренные, максимальные; есть скорость. Системное отключение движения имеет приоритет.\n\nГДЕ ДАННЫЕ?\n\n%LocalAppData%\\SecretManager\\vault.db. Удаление программы сохраняет хранилище. Приложение работает локально и не отправляет ваши секреты в сеть. Почтового входа нет."
         };
         var dialog = Dialog("Инструкция и FAQ", new ScrollViewer { Content = text, MaxHeight = 580 });
         dialog.Resources["ContentDialogMaxWidth"] = 720d;

@@ -23,6 +23,7 @@ try {
     if (-not $SkipTests) {
         dotnet test tests/SecretManager.Core.Tests/SecretManager.Core.Tests.csproj -c Release --no-restore
         if ($LASTEXITCODE -ne 0) { throw 'Core tests failed; no installer was produced.' }
+        & (Join-Path $PSScriptRoot 'Test-Themes.ps1')
     }
     if (-not $SkipPublish) {
         # Delete only this known generated subtree, after verifying its exact absolute location.

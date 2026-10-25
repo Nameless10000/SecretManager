@@ -2,14 +2,17 @@
  xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
  xmlns:vm="using:SecretManager.App.ViewModels"
+ xmlns:services="using:SecretManager.App.Services"
+ xmlns:controls="using:SecretManager.App.Controls"
  Title="SecretManager">
  <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+  <Grid.Resources><services:ThemeResources/></Grid.Resources>
   <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
   <Grid x:Name="TitleBar" Background="Transparent" Padding="20,0,148,0">
    <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
     <FontIcon Glyph="&#xE72E;" FontSize="16" Foreground="{ThemeResource SystemControlHighlightAccentBrush}"/>
     <TextBlock Text="SecretManager" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center"/>
-    <TextBlock Text="Личное пространство" FontSize="12" Opacity="0.5" Margin="8,0,0,0" VerticalAlignment="Center"/>
+    <TextBlock Text="Личное пространство" FontSize="12" Foreground="{ThemeResource VaultSecondaryTextBrush}" Margin="8,0,0,0" VerticalAlignment="Center"/>
    </StackPanel>
   </Grid>
 
@@ -19,13 +22,13 @@
     <StackPanel Spacing="18">
      <Image Source="Assets/mark.svg" Width="72" Height="72" HorizontalAlignment="Left"/>
      <StackPanel Spacing="8"><TextBlock x:Name="LoginHeading" Text="С возвращением" FontSize="30" FontWeight="SemiBold"/>
-      <TextBlock x:Name="LoginDescription" Text="Ваши секреты под замком. Введите мастер-пароль, чтобы продолжить." TextWrapping="Wrap" Opacity="0.65"/></StackPanel>
+      <TextBlock x:Name="LoginDescription" Text="Ваши секреты под замком. Введите мастер-пароль, чтобы продолжить." TextWrapping="Wrap" Foreground="{ThemeResource VaultSecondaryTextBrush}"/></StackPanel>
      <PasswordBox x:Name="LoginPassword" Header="Мастер-пароль" KeyDown="LoginPassword_KeyDown" PasswordRevealMode="Peek"/>
      <PasswordBox x:Name="LoginConfirmation" Header="Повторите пароль" Visibility="Collapsed" KeyDown="LoginPassword_KeyDown"/>
      <InfoBar x:Name="LoginError" IsOpen="False" Severity="Error" IsClosable="True"/>
      <Button x:Name="UnlockButton" Content="Открыть хранилище" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Stretch" Padding="16,12" Click="Unlock_Click"/>
      <ProgressRing x:Name="LoginProgress" IsActive="False" Width="24" Height="24" Visibility="Collapsed"/>
-     <TextBlock Text="Локально на вашем устройстве · AES-256-GCM" FontSize="12" Opacity="0.5" TextWrapping="Wrap"/>
+     <TextBlock Text="Локально на вашем устройстве · AES-256-GCM" FontSize="12" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
      <Button Content="Как это работает?" Style="{StaticResource QuietButton}" HorizontalAlignment="Left" Click="Help_Click"/>
     </StackPanel>
    </Border>
@@ -38,9 +41,9 @@
      <Grid Padding="14,20,14,18" Background="{ThemeResource LayerFillColorDefaultBrush}">
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <StackPanel Spacing="14">
-       <TextBlock Text="ПРОСТРАНСТВО" FontSize="10" FontWeight="SemiBold" CharacterSpacing="120" Opacity="0.5" Margin="12,0,0,4"/>
+       <TextBlock Text="ПРОСТРАНСТВО" FontSize="10" FontWeight="SemiBold" CharacterSpacing="120" Foreground="{ThemeResource VaultSecondaryTextBrush}" Margin="12,0,0,4"/>
        <Button HorizontalAlignment="Stretch" Click="All_Click" Padding="12,10"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8F1;" FontSize="17"/><TextBlock Text="Все ассоциации"/></StackPanel></Button>
-       <TextBlock Text="БЫСТРЫЙ ПЕРЕХОД" FontSize="10" CharacterSpacing="100" Opacity="0.45" Margin="12,16,0,0"/>
+       <TextBlock Text="БЫСТРЫЙ ПЕРЕХОД" FontSize="10" CharacterSpacing="100" Foreground="{ThemeResource VaultSecondaryTextBrush}" Margin="12,16,0,0"/>
       </StackPanel>
       <ListView x:Name="QuickNavigation" Grid.Row="1" Margin="0,122,0,12" ItemsSource="{x:Bind ViewModel.Associations}" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="QuickNavigation_ItemClick" Background="Transparent">
        <ListView.ItemTemplate><DataTemplate x:DataType="vm:AssociationViewModel"><TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" Padding="2,6"/></DataTemplate></ListView.ItemTemplate>
@@ -51,12 +54,12 @@
        <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" Click="Help_Click"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE897;" FontSize="17"/><TextBlock Text="Инструкция и FAQ"/></StackPanel></Button>
        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,10"/>
        <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" Command="{x:Bind ViewModel.LockCommand}"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE72E;" FontSize="17"/><TextBlock Text="Заблокировать"/></StackPanel></Button>
-       <TextBlock Text="Только на вашем устройстве" FontSize="11" Opacity="0.4" Margin="12,8,0,0"/>
+       <TextBlock Text="Только на вашем устройстве" FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" Margin="12,8,0,0"/>
       </StackPanel>
      </Grid>
     </SplitView.Pane>
     <Grid Padding="28,18,28,18" RowSpacing="20">
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
       <Button Style="{StaticResource QuietButton}" Click="Menu_Click" ToolTipService.ToolTip="Показать или скрыть меню" AutomationProperties.Name="Меню"><FontIcon Glyph="&#xE700;" FontSize="19"/></Button>
       <AutoSuggestBox x:Name="SearchBox" Grid.Column="1" Text="{x:Bind ViewModel.Query, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" PlaceholderText="Поиск по названию ассоциации" MaxWidth="620" HorizontalAlignment="Stretch" VerticalAlignment="Center"><AutoSuggestBox.QueryIcon><SymbolIcon Symbol="Find"/></AutoSuggestBox.QueryIcon></AutoSuggestBox>
@@ -64,25 +67,24 @@
       <Button Grid.Column="3" Style="{StaticResource QuietButton}" Click="Settings_Click" ToolTipService.ToolTip="Настройки" AutomationProperties.Name="Настройки"><FontIcon Glyph="&#xE713;" FontSize="19"/></Button>
      </Grid>
      <Grid Grid.Row="1" Margin="2,12,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <StackPanel Spacing="6"><TextBlock Text="ВСЁ ВАЖНОЕ — РЯДОМ" FontSize="10" FontWeight="SemiBold" CharacterSpacing="140" Foreground="{ThemeResource SystemControlHighlightAccentBrush}"/><TextBlock Text="Ваши секреты" FontSize="32" FontWeight="SemiBold"/><TextBlock Text="{x:Bind ViewModel.CountLabel, Mode=OneWay}" Opacity="0.5" FontSize="13"/></StackPanel>
+      <StackPanel Spacing="6"><TextBlock Text="ВСЁ ВАЖНОЕ — РЯДОМ" FontSize="10" FontWeight="SemiBold" CharacterSpacing="140" Foreground="{ThemeResource SystemControlHighlightAccentBrush}"/><TextBlock Text="Ваши секреты" FontSize="32" FontWeight="SemiBold"/><TextBlock Text="{x:Bind ViewModel.CountLabel, Mode=OneWay}" Foreground="{ThemeResource VaultSecondaryTextBrush}" FontSize="13"/></StackPanel>
       <Button Grid.Column="1" Style="{StaticResource AccentButtonStyle}" VerticalAlignment="Center" Click="AddAssociation_Click" Padding="16,12"><StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE710;" FontSize="14"/><TextBlock Text="Новая ассоциация"/></StackPanel></Button>
      </Grid>
-     <InfoBar x:Name="Notice" Grid.Row="2" IsOpen="False" IsClosable="True" Severity="Informational"/>
-     <Grid Grid.Row="3">
+     <Grid Grid.Row="2">
       <StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="14" MaxWidth="360">
        <Image Source="Assets/vault-empty.svg" Width="180" Height="140"/>
        <TextBlock x:Name="EmptyHeading" Text="Место для ваших секретов" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Center"/>
-       <TextBlock x:Name="EmptyDescription" Text="Создайте ассоциацию для сайта или приложения, затем добавьте логин, пароль, ключи или файлы." TextWrapping="Wrap" TextAlignment="Center" Opacity="0.55"/>
+       <TextBlock x:Name="EmptyDescription" Text="Создайте ассоциацию для сайта или приложения, затем добавьте логин, пароль, ключи или файлы." TextWrapping="Wrap" TextAlignment="Center" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
       </StackPanel>
-      <ListView x:Name="AssociationList" ItemsSource="{x:Bind ViewModel.Associations}" SelectionMode="None" Background="Transparent" HorizontalContentAlignment="Stretch" Padding="0,0,4,0">
+      <ListView x:Name="AssociationList" ItemsSource="{x:Bind ViewModel.Associations}" SelectionMode="None" Background="Transparent" HorizontalContentAlignment="Stretch" Padding="12,10,12,12">
        <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/><Setter Property="Margin" Value="0,0,0,12"/><Setter Property="MinHeight" Value="0"/></Style></ListView.ItemContainerStyle>
        <ListView.ItemTemplate>
         <DataTemplate x:DataType="vm:AssociationViewModel">
          <Expander x:Name="TopicExpander" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}" Loaded="Card_Loaded">
           <Expander.Header>
            <Grid ColumnSpacing="16" Padding="0,4"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Border Width="44" Height="44" CornerRadius="13" Background="{ThemeResource SystemControlHighlightAccentBrush}" Opacity="0.9"><TextBlock Text="{x:Bind Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" FontSize="20" FontWeight="SemiBold"/></Border>
-            <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center"><TextBlock Text="{x:Bind Title}" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{x:Bind Subtitle}" FontSize="11" Opacity="0.5"/></StackPanel>
+            <Border Width="44" Height="44" CornerRadius="13" Background="{ThemeResource VaultAccentBrush}"><TextBlock Text="{x:Bind Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{ThemeResource VaultOnAccentBrush}" FontSize="20" FontWeight="SemiBold"/></Border>
+            <StackPanel Grid.Column="1" Spacing="4" VerticalAlignment="Center"><TextBlock Text="{x:Bind Title}" FontSize="17" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/><TextBlock Text="{x:Bind Subtitle}" FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}"/></StackPanel>
            </Grid>
           </Expander.Header>
           <StackPanel Spacing="12">
@@ -90,7 +92,7 @@
             <ItemsControl.ItemTemplate><DataTemplate x:DataType="vm:FieldViewModel">
              <Grid ColumnSpacing="10" Padding="0,8" MinHeight="52"><Grid.ColumnDefinitions><ColumnDefinition Width="24"/><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <FontIcon Glyph="{x:Bind Icon}" FontSize="17" Opacity="0.5"/>
-              <TextBlock Grid.Column="1" Text="{x:Bind Description}" VerticalAlignment="Center" TextWrapping="Wrap" Opacity="0.7"/>
+              <TextBlock Grid.Column="1" Text="{x:Bind Description}" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
               <Button Grid.Column="2" Tag="{Binding}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Style="{StaticResource QuietButton}" Click="Value_Click" ToolTipService.ToolTip="Нажмите, чтобы скопировать"><TextBlock Text="{x:Bind DisplayValue}" TextTrimming="CharacterEllipsis"/></Button>
               <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                <Button Tag="{Binding}" Click="Copy_Click" Style="{StaticResource QuietButton}" ToolTipService.ToolTip="Копировать" AutomationProperties.Name="Копировать значение"><FontIcon Glyph="&#xE8C8;" FontSize="15"/></Button>
@@ -112,7 +114,8 @@
        </ListView.ItemTemplate>
       </ListView>
      </Grid>
-     <Grid Grid.Row="4"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="{x:Bind ViewModel.Status, Mode=OneWay}" FontSize="11" Opacity="0.5" TextTrimming="CharacterEllipsis"/><StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE73E;" FontSize="11" Foreground="#4CAF83"/><TextBlock Text="Защищено" FontSize="11" Opacity="0.5"/></StackPanel></Grid>
+     <controls:ToastNotification x:Name="Notice" Grid.Row="2" Canvas.ZIndex="10" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="20,8,20,0" MaxWidth="460" Background="{ThemeResource VaultCardBrush}" BorderBrush="{ThemeResource VaultStrokeBrush}"/>
+     <StackPanel Grid.Row="3" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6"><FontIcon Glyph="&#xE73E;" FontSize="11" Foreground="{ThemeResource VaultAccentTextBrush}"/><TextBlock Text="Защищено" FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}"/></StackPanel>
     </Grid>
    </SplitView>
 
@@ -123,7 +126,7 @@
       <TextBlock Text="Оформление" FontSize="16" FontWeight="SemiBold"/>
       <ComboBox x:Name="ThemeChoice" Header="Тема" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Системная</x:String><x:String>Светлая</x:String><x:String>Тёмная</x:String><x:String>Полночь</x:String><x:String>Лесная</x:String><x:String>Своя тема</x:String></ComboBox>
       <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="AccentButton" Content="Цвет акцента" Click="AccentColor_Click"/><Button x:Name="BackgroundButton" Content="Цвет фона" Click="BackgroundColor_Click"/></StackPanel>
-      <TextBlock Text="Собственные цвета применяются к «Своей теме». Контраст текста подбирается автоматически." FontSize="11" Opacity="0.55" TextWrapping="Wrap"/>
+      <TextBlock Text="Собственные цвета применяются к «Своей теме». Контраст текста подбирается автоматически." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
       <ComboBox x:Name="FontChoice" Header="Шрифт" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Segoe UI Variable</x:String><x:String>Segoe UI</x:String><x:String>Arial</x:String><x:String>Calibri</x:String><x:String>Consolas</x:String></ComboBox>
       <NumberBox x:Name="FontSizeChoice" Header="Размер текста" Minimum="12" Maximum="20" SmallChange="1" SpinButtonPlacementMode="Compact" ValueChanged="AppearanceNumber_Changed"/>
       <TextBlock Text="Скругление карточек" FontSize="12"/>
@@ -132,7 +135,7 @@
       <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
       <TextBlock Text="Движение и отклик" FontSize="16" FontWeight="SemiBold"/>
       <ComboBox x:Name="AnimationChoice" Header="Количество анимаций" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Отключить анимации</x:String><x:String>Умеренные</x:String><x:String>Максимальная анимированность</x:String></ComboBox>
-      <TextBlock Text="Максимум: пружины, появление карточек и анимация наведения. Системная настройка отключения движения имеет приоритет." FontSize="11" Opacity="0.55" TextWrapping="Wrap"/>
+      <TextBlock Text="Максимум: пружины, появление карточек и анимация наведения. Системная настройка отключения движения имеет приоритет." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
       <TextBlock Text="Скорость анимаций · от плавной к быстрой" FontSize="12"/>
       <Slider x:Name="MotionSpeedChoice" Minimum="0.5" Maximum="2" StepFrequency="0.1" ValueChanged="AppearanceSlider_Changed"/>
       <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
@@ -140,7 +143,7 @@
       <Button Content="Сменить мастер-пароль" Click="ChangePassword_Click" HorizontalAlignment="Stretch"/>
       <NumberBox x:Name="LockMinutesChoice" Header="Блокировка без фокуса, минут" Minimum="0" Maximum="120" SmallChange="1" SpinButtonPlacementMode="Compact"/>
       <NumberBox x:Name="ClipboardSecondsChoice" Header="Очистка буфера, секунд" Minimum="0" Maximum="300" SmallChange="5" SpinButtonPlacementMode="Compact"/>
-      <TextBlock Text="0 отключает соответствующий таймер." FontSize="11" Opacity="0.55"/>
+      <TextBlock Text="0 отключает соответствующий таймер." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
       <ToggleSwitch x:Name="TrayChoice" Header="Закрытие крестиком — в трей"/>
       <ToggleSwitch x:Name="LockHiddenChoice" Header="Сразу блокировать при уходе в трей"/>
       <Button Content="Сбросить оформление" Click="ResetAppearance_Click" HorizontalAlignment="Stretch"/>
