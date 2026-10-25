@@ -23,6 +23,49 @@
 
 Исходные требования и результаты проверки ведутся в [WORK_LOG.md](WORK_LOG.md).
 
+## Установка
+
+Скачайте **[актуальный установщик Windows x64](https://github.com/Nameless10000/SecretManager/releases/latest/download/SecretManager-Setup.exe)**.
+Установка для текущего пользователя, права администратора не нужны. .NET и Windows
+App SDK включены в дистрибутив. Windows 10 2004 / 19041 или новее.
+
+Хранилище: `%LocalAppData%\SecretManager\vault.db`. Удаление приложения сохраняет
+данные. Старые установщики не архивируются: существует один релиз `latest` с одним
+актуальным EXE и его [SHA-256](https://github.com/Nameless10000/SecretManager/releases/latest/download/SecretManager-Setup.sha256).
+
+## Сборка из исходников
+
+Установите .NET SDK 10 и откройте `SecretManager.sln`. Проект использует WinUI 3;
+для работы в IDE подойдёт Visual Studio с компонентами разработки Windows-приложений.
+Командная сборка в Windows:
+
+```powershell
+dotnet restore SecretManager.sln
+dotnet test tests/SecretManager.Core.Tests/SecretManager.Core.Tests.csproj -c Release --no-restore
+dotnet build src/SecretManager.App/SecretManager.App.csproj -c Release -p:Platform=x64 --no-restore
+```
+
+Для установщика нужен [Inno Setup 6/7](https://jrsoftware.org/isdl.php):
+
+```powershell
+./scripts/Build-Installer.ps1
+```
+
+Результат: `artifacts/installer/SecretManager-Setup.exe`. Повторная сборка заменяет
+этот файл. В Git бинарники и данные не попадают. GitHub Actions запускает тесты,
+собирает установщик и обновляет единственный релиз `latest` после push в `main`.
+
+## Оформление и управление
+
+Темы: системная, светлая, тёмная, «Полночь», «Лесная» и собственная. В редакторе:
+акцент, фон, шрифт, размер, скругления и плотность. Анимации: отключены, умеренные
+или максимальные, с регулировкой скорости. Иконки SVG контурные с прозрачным фоном.
+В настройках виден предпросмотр; кнопка сохранения закрепляет изменения.
+
+`Ctrl+L` — заблокировать, `Ctrl+F` — перейти в поиск. Крестик по умолчанию скрывает
+окно в трей с немедленной блокировкой. Явный выход — правой кнопкой по значку трея.
+Встроенная инструкция и FAQ доступны в боковом меню и на экране входа.
+
 ## Безопасность
 
 Названия, описания, значения, имена и base64-содержимое файлов находятся внутри

@@ -9,11 +9,11 @@ public partial class App : Microsoft.UI.Xaml.Application
     public MainWindow? MainWindow { get; private set; }
     public App()
     {
-        UnhandledException += (_, args) => WriteStartupError(args.Exception);
+        UnhandledException += (_, args) => WriteStartupError(args.Exception, args.Message);
         try { InitializeComponent(); }
         catch (Exception ex) { WriteStartupError(ex); throw; }
     }
-    private static void WriteStartupError(Exception exception)
+    private static void WriteStartupError(Exception exception, string? detail = null)
     {
         try
         {
@@ -21,7 +21,10 @@ public partial class App : Microsoft.UI.Xaml.Application
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SecretManager");
             Directory.CreateDirectory(folder);
             // Startup diagnostics only: no vault payloads, passwords or exception data dictionaries.
-            File.WriteAllText(Path.Combine(folder, "startup-error.log"), exception.GetType().FullName + "\n" + exception.Message + "\n" + exception.StackTrace);
+            var message = exception.ToString() + "\n" + detail;
+            if (exception is Microsoft.UI.Xaml.Markup.XamlParseException)
+                foreach (System.Collections.DictionaryEntry item in exception.Data) message += "\n" + item.Key + ": " + item.Value;
+            File.WriteAllText(Path.Combine(folder, "startup-error.log"), message);
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

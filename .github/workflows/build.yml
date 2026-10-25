@@ -1,0 +1,36 @@
+name: Build and publish latest installer
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: secretmanager-latest
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore SecretManager.sln
+      - name: Build installer and run core tests
+        shell: pwsh
+        run: ./scripts/Build-Installer.ps1
+      - name: Publish one rolling release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git tag -f latest
+          git push origin latest --force
+          gh release view latest *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create latest --title 'SecretManager — latest' --notes 'Актуальный установщик Windows x64. Предыдущий файл заменяется; архив установщиков не хранится.'
+          }
+          gh release upload latest artifacts/installer/SecretManager-Setup.exe artifacts/installer/SecretManager-Setup.sha256 --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
