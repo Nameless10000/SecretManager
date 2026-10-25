@@ -9,7 +9,7 @@ try {
     }
     $output = Join-Path $projectRoot 'artifacts\theme-checks'
     New-Item -ItemType Directory -Force -Path $output | Out-Null
-    foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt')) {
+    foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt', 'native-error.txt')) {
         $previous = Join-Path $output $name
         if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous }
     }
@@ -28,6 +28,8 @@ try {
     if ($exitCode -ne 0 -or -not $result.Passed) {
         $stage = Join-Path $output 'teardown-stage.txt'
         if (Test-Path -LiteralPath $stage) { Get-Content -LiteralPath $stage | Write-Output }
+        $nativeError = Join-Path $output 'native-error.txt'
+        if (Test-Path -LiteralPath $nativeError) { Get-Content -LiteralPath $nativeError | Write-Output }
         try {
             Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-5);Level=2} -ErrorAction Stop |
                 Where-Object Message -Like '*SecretManager.ThemeChecks*' | Select-Object -First 2 -ExpandProperty Message | Write-Output

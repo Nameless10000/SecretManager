@@ -5,6 +5,7 @@ public partial class App : Microsoft.UI.Xaml.Application
     private ThemeCheckWindow? window;
     public App()
     {
+        NativeFailureDiagnostics.Install();
         UnhandledException += (_, e) => Report(e.Exception.ToString() + "\n" + e.Message);
         InitializeComponent();
     }
