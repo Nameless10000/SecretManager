@@ -50,6 +50,21 @@ public sealed class MergeAndLockTests
     }
 
     [Fact]
+    public void KeepBothFindsAUniqueNameAndResolvesCrossTopicFieldIds()
+    {
+        var original = Topic("Сайт", "old");
+        var local = new VaultDocument { Associations = [original, Topic("Сайт (импорт)", "existing")] };
+        var incoming = new VaultDocument { Associations = [Topic("Сайт", "new")] };
+        var merged = VaultMerge.Merge(local, incoming, new Dictionary<Guid, ConflictResolution>
+            { [incoming.Associations[0].Id] = ConflictResolution.KeepBoth });
+        Assert.Contains(merged.Associations, a => a.Title == "Сайт (импорт 2)");
+        var collision = Topic("Другая", "new") with { Id = original.Fields[0].Id };
+        var additional = VaultMerge.Merge(local, new() { Associations = [collision] }, new Dictionary<Guid, ConflictResolution>());
+        Assert.Equal(3, additional.Associations.Count);
+        VaultValidation.Validate(additional);
+    }
+
+    [Fact]
     public void FocusTimeoutUsesElapsedTimeAndResetsOnFocus()
     {
         var policy = new FocusLockPolicy(); var now = DateTimeOffset.UtcNow;

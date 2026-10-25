@@ -15,10 +15,11 @@ public static class VaultValidation
         if (document.Associations.Count > 10_000 || document.Associations.Any(a => a is null))
             throw new InvalidDataException("Слишком много ассоциаций или неверный формат.");
         var ids = new HashSet<Guid>();
+        var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var association in document.Associations)
         {
             if (association.Id == Guid.Empty || !ids.Add(association.Id) ||
-                string.IsNullOrWhiteSpace(association.Title) || association.Title.Length > 200 ||
+                string.IsNullOrWhiteSpace(association.Title) || association.Title.Length > 200 || !titles.Add(association.Title.Trim()) ||
                 association.Fields is null || association.Fields.Count > 1000)
                 throw new InvalidDataException("Некорректная ассоциация: проверьте название и поля.");
             foreach (var field in association.Fields)

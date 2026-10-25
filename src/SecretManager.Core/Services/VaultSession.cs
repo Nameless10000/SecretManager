@@ -69,6 +69,7 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
         lock (sync)
         {
             _ = Document;
+            VaultValidation.Validate(next);
             using var candidate = new DisposableIndexHolder(new TitleSearchIndex(next.Associations));
             var envelope = VaultCrypto.Encrypt(next, key!, salt!, VaultCrypto.LocalContext);
             repository.Write(envelope);
@@ -103,14 +104,14 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
         lock (sync)
         {
             var value = VaultCrypto.Protect(Document, password, VaultCrypto.ExportContext);
-            try { return JsonSerializer.Serialize(value.Envelope); }
+            try { return ExportPackage.Create(value.Envelope); }
             finally { CryptographicOperations.ZeroMemory(value.Key); }
         }
     }
 
     public static VaultDocument ReadExport(string json, string password)
     {
-        var value = VaultCrypto.Unprotect(VaultCrypto.Parse(json), password, VaultCrypto.ExportContext);
+        var value = VaultCrypto.Unprotect(ExportPackage.Read(json), password, VaultCrypto.ExportContext);
         try { return value.Document; }
         finally { CryptographicOperations.ZeroMemory(value.Key); }
     }

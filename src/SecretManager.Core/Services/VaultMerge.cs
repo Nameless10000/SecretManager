@@ -40,9 +40,14 @@ public static class VaultMerge
                     result.Add(ReidentifyFieldCollisions(incoming with { Id = existing.Id }, result));
                     break;
                 case ConflictResolution.KeepBoth:
+                    var baseTitle = incoming.Title[..Math.Min(incoming.Title.Length, 170)];
+                    var duplicateTitle = baseTitle + " (импорт)";
+                    var suffix = 2;
+                    while (result.Any(a => string.Equals(a.Title, duplicateTitle, StringComparison.OrdinalIgnoreCase)))
+                        duplicateTitle = baseTitle + $" (импорт {suffix++})";
                     var duplicate = incoming with
                     {
-                        Id = Guid.NewGuid(), Title = incoming.Title[..Math.Min(incoming.Title.Length, 180)] + " (импорт)",
+                        Id = Guid.NewGuid(), Title = duplicateTitle,
                         Fields = incoming.Fields.Select(f => f with { Id = Guid.NewGuid() }).ToList()
                     };
                     result.Add(duplicate);
@@ -65,7 +70,8 @@ public static class VaultMerge
     private static SecretAssociation ReidentifyFieldCollisions(SecretAssociation incoming, IEnumerable<SecretAssociation> existing)
     {
         var used = existing.Select(a => a.Id).Concat(existing.SelectMany(a => a.Fields.Select(f => f.Id))).ToHashSet();
-        return incoming with { Fields = incoming.Fields.Select(f => used.Contains(f.Id) || f.Id == incoming.Id
+        var topicId = used.Contains(incoming.Id) ? Guid.NewGuid() : incoming.Id;
+        return incoming with { Id = topicId, Fields = incoming.Fields.Select(f => used.Contains(f.Id) || f.Id == topicId
             ? f with { Id = Guid.NewGuid() } : f).ToList() };
     }
 }

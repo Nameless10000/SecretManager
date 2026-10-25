@@ -80,7 +80,7 @@ public sealed class VaultTests : IDisposable
         var document = VaultSession.ReadExport(exported, "independent export password");
         Assert.Equal("Почта Example", document.Associations[0].Title);
         Assert.ThrowsAny<CryptographicException>(() => VaultSession.ReadExport(exported, Password));
-        Assert.ThrowsAny<CryptographicException>(() => VaultCrypto.Unprotect(VaultCrypto.Parse(exported),
+        Assert.ThrowsAny<CryptographicException>(() => VaultCrypto.Unprotect(ExportPackage.Read(exported),
             "independent export password", VaultCrypto.LocalContext));
     }
 
@@ -95,6 +95,21 @@ public sealed class VaultTests : IDisposable
             { Ciphertext = Convert.ToBase64String(cipher) }, Password, VaultCrypto.ExportContext));
         }
         finally { CryptographicOperations.ZeroMemory(value.Key); }
+    }
+
+    [Fact]
+    public void ExportChecksumDetectsChangesAndRecomputedChecksumCannotBypassAuthentication()
+    {
+        using var session = new VaultSession(Repository); session.Create(Password); session.Save(Sample());
+        var exported = session.Export(Password);
+        var package = System.Text.Json.JsonSerializer.Deserialize<ExportPackage>(exported)!;
+        var envelope = VaultCrypto.Parse(package.Payload);
+        var bytes = Convert.FromBase64String(envelope.Ciphertext); bytes[0] ^= 1;
+        var modified = envelope with { Ciphertext = Convert.ToBase64String(bytes) };
+        var wrongChecksum = System.Text.Json.JsonSerializer.Serialize(package with { Payload = System.Text.Json.JsonSerializer.Serialize(modified) });
+        Assert.Throws<InvalidDataException>(() => VaultSession.ReadExport(wrongChecksum, Password));
+        var recomputedChecksum = ExportPackage.Create(modified);
+        Assert.ThrowsAny<CryptographicException>(() => VaultSession.ReadExport(recomputedChecksum, Password));
     }
 
     [Fact]
