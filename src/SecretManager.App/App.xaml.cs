@@ -6,28 +6,19 @@ namespace SecretManager.App;
 public partial class App : Microsoft.UI.Xaml.Application
 {
     private Mutex? instance;
+    private bool primaryInstance;
     public MainWindow? MainWindow { get; private set; }
     public App()
     {
-        UnhandledException += (_, args) => WriteStartupError(args.Exception, args.Message);
+        UnhandledException += (_, args) => AppDiagnostics.Journal.Record(AppEvent.UnhandledException, args.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            AppDiagnostics.Journal.Record(AppEvent.UnhandledException, args.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (_, args) => AppDiagnostics.Journal.Record(AppEvent.UnobservedTask, args.Exception);
+        // Native fail-fast does not necessarily reach managed exception handlers.
+        // Leave run.pending until normal CLR process exit, after WinUI teardown.
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => { if (primaryInstance) AppDiagnostics.Journal.StopCleanly(); };
         try { InitializeComponent(); }
-        catch (Exception ex) { WriteStartupError(ex); throw; }
-    }
-    private static void WriteStartupError(Exception exception, string? detail = null)
-    {
-        try
-        {
-            var folder = Environment.GetEnvironmentVariable("SECRETMANAGER_DATA_DIR") ??
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SecretManager");
-            Directory.CreateDirectory(folder);
-            // Startup diagnostics only: no vault payloads, passwords or exception data dictionaries.
-            var message = exception.ToString() + "\n" + detail;
-            if (exception is Microsoft.UI.Xaml.Markup.XamlParseException)
-                foreach (System.Collections.DictionaryEntry item in exception.Data) message += "\n" + item.Key + ": " + item.Value;
-            File.WriteAllText(Path.Combine(folder, "startup-error.log"), message);
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
+        catch (Exception ex) { AppDiagnostics.Journal.Record(AppEvent.StartupFailed, ex); throw; }
     }
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
@@ -39,8 +30,13 @@ public partial class App : Microsoft.UI.Xaml.Application
             instance.Dispose(); instance = null;
             Exit(); return;
         }
-        MainWindow = new MainWindow();
-        MainWindow.Activate();
-        MainWindow.Closed += (_, _) => { instance?.ReleaseMutex(); instance?.Dispose(); instance = null; };
+        primaryInstance = true; AppDiagnostics.Journal.Start();
+        try
+        {
+            MainWindow = new MainWindow();
+            MainWindow.Activate();
+            MainWindow.Closed += (_, _) => { instance?.ReleaseMutex(); instance?.Dispose(); instance = null; };
+        }
+        catch (Exception ex) { AppDiagnostics.Journal.Record(AppEvent.StartupFailed, ex); throw; }
     }
 }

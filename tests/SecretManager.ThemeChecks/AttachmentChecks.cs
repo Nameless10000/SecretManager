@@ -90,7 +90,7 @@ internal static class AttachmentChecks
         return 11;
     }
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
-    private static async Task<InMemoryRandomAccessStream> MakeImage(Guid encoderId)
+    internal static async Task<InMemoryRandomAccessStream> MakeImage(Guid encoderId)
     {
         var stream = new InMemoryRandomAccessStream();
         var encoder = await BitmapEncoder.CreateAsync(encoderId, stream);

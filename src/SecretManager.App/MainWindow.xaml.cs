@@ -43,8 +43,7 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
-        var dataFolder = Environment.GetEnvironmentVariable("SECRETMANAGER_DATA_DIR") ??
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SecretManager");
+        var dataFolder = AppPaths.DataDirectory;
         ViewModel = new MainViewModel(Path.Combine(dataFolder, "vault.db"));
         InitializeComponent();
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
@@ -55,7 +54,7 @@ public sealed partial class MainWindow : Window
         if (AppWindow.Presenter is OverlappedPresenter presenter) presenter.PreferredMinimumWidth = 980;
         clipboard = new ClipboardService();
         motion = new MotionService(() => appearancePreview ?? ViewModel.Settings);
-        tray = new TrayService(ShowWindow, () => ViewModel.Lock(), ExitApplication);
+        tray = new TrayService(ShowWindow, () => { if (!exiting) ViewModel.Lock(); }, ExitApplication);
         ViewModel.SessionChanged += UpdateSession;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         Activated += Window_Activated;
@@ -64,12 +63,12 @@ public sealed partial class MainWindow : Window
         Root.Loaded += (_, _) => { UpdateSession(); ApplyAppearance(); motion.Wire(Root); motion.Enter(LoginView); LoginPassword.Focus(FocusState.Programmatic); };
         Root.ActualThemeChanged += (_, _) =>
         {
-            if (!applyingAppearance && (appearancePreview ?? ViewModel.Settings).Theme == AppTheme.System) ApplyAppearance();
+            if (!exiting && !applyingAppearance && (appearancePreview ?? ViewModel.Settings).Theme == AppTheme.System) ApplyAppearance();
         };
         timer.Tick += (_, _) => CheckFocusTimeout(); timer.Start();
         SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
         var lockKey = new KeyboardAccelerator { Key = VirtualKey.L, Modifiers = VirtualKeyModifiers.Control };
-        lockKey.Invoked += (_, e) => { ViewModel.Lock(); e.Handled = true; };
+        lockKey.Invoked += (_, e) => { if (!exiting) ViewModel.Lock(); e.Handled = true; };
         Root.KeyboardAccelerators.Add(lockKey);
         var findKey = new KeyboardAccelerator { Key = VirtualKey.F, Modifiers = VirtualKeyModifiers.Control };
         findKey.Invoked += (_, e) => { if (ViewModel.IsUnlocked) SearchBox.Focus(FocusState.Programmatic); e.Handled = true; };
@@ -88,6 +87,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateSession()
     {
+        AppDiagnostics.Journal.Record(ViewModel.IsUnlocked ? AppEvent.Unlocked : AppEvent.Locked);
         epoch++;
         LoginView.Visibility = ViewModel.IsUnlocked ? Visibility.Collapsed : Visibility.Visible;
         VaultView.Visibility = ViewModel.IsUnlocked ? Visibility.Visible : Visibility.Collapsed;
@@ -125,25 +125,32 @@ public sealed partial class MainWindow : Window
             "Попробуйте другое название или начало слова. Поиск не учитывает регистр.";
     }
 
-    private async Task Run(Func<Task> action)
+    private async Task Run(Func<Task> action, [System.Runtime.CompilerServices.CallerMemberName] string operation = "")
     {
-        if (actionBusy) return;
+        if (actionBusy || exiting) return;
         actionBusy = true;
-        try { await action(); }
-        catch (OperationCanceledException) { }
+        AppDiagnostics.Journal.Record(AppEvent.ActionStarted, operation: operation);
+        try { await action(); AppDiagnostics.Journal.Record(AppEvent.ActionCompleted, operation: operation); }
+        catch (OperationCanceledException) { AppDiagnostics.Journal.Record(AppEvent.ActionCancelled, operation: operation); }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or IOException or InvalidDataException or UnauthorizedAccessException or
-            CryptographicException or System.Runtime.InteropServices.COMException or System.Text.Json.JsonException)
+            CryptographicException or System.Runtime.InteropServices.COMException or System.Text.Json.JsonException or System.ComponentModel.Win32Exception)
         {
+            AppDiagnostics.Journal.Record(AppEvent.ActionRejected, ex, operation);
             var message = ex is CryptographicException ? "Неверный пароль либо файл повреждён или изменён." : ex.Message;
-            if (ViewModel.IsUnlocked) Notify(message, true);
-            else { LoginError.Message = message; LoginError.IsOpen = true; }
+            if (!exiting)
+            {
+                if (ViewModel.IsUnlocked) Notify(message, true);
+                else { LoginError.Message = message; LoginError.IsOpen = true; }
+            }
         }
+        catch (Exception ex) { AppDiagnostics.Journal.Record(AppEvent.ActionFailed, ex, operation); throw; }
         finally { actionBusy = false; }
     }
     private void RequireSession(int captured)
     { if (!ViewModel.IsUnlocked || captured != epoch) throw new OperationCanceledException(); }
     private void Notify(string message, bool error = false)
     {
+        if (exiting) return;
         ViewModel.Status = message;
         Notice.Show(message, error); motion.Enter(Notice);
     }
@@ -176,7 +183,7 @@ public sealed partial class MainWindow : Window
         if (activeDialog is not null) throw new InvalidOperationException("Сначала закройте текущее окно.");
         activeDialog = dialog;
         void Decorate(object sender, RoutedEventArgs args)
-        { ThemeService.ApplyTypography(dialog, appearancePreview ?? ViewModel.Settings); motion.Wire(dialog); }
+        { if (!exiting && ReferenceEquals(activeDialog, dialog)) { ThemeService.ApplyTypography(dialog, appearancePreview ?? ViewModel.Settings); motion.Wire(dialog); } }
         dialog.Loaded += Decorate;
         try { return await dialog.ShowAsync(); }
         finally { dialog.Loaded -= Decorate; if (ReferenceEquals(activeDialog, dialog)) activeDialog = null; }
@@ -359,7 +366,8 @@ public sealed partial class MainWindow : Window
         var picker = new FileSavePicker { SuggestedFileName = "SecretManager-backup" };
         picker.FileTypeChoices.Add("Зашифрованное хранилище", [".smvault"]); WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         var file = await picker.PickSaveFileAsync(); RequireSession(captured); if (file is null) return;
-        await File.WriteAllTextAsync(file.Path, encrypted); Notify("Зашифрованная копия сохранена. SHA-256 и AES-GCM защищают целостность.");
+        await File.WriteAllTextAsync(file.Path, encrypted); RequireSession(captured);
+        Notify("Зашифрованная копия сохранена. SHA-256 и AES-GCM защищают целостность.");
     });
     private async void Import_Click(object sender, RoutedEventArgs e) => await Run(async () =>
     {
@@ -367,8 +375,11 @@ public sealed partial class MainWindow : Window
         var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".smvault"); WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
         var file = await picker.PickSingleFileAsync(); RequireSession(captured); if (file is null) return;
         var properties = await file.GetBasicPropertiesAsync(); RequireSession(captured);
-        if (properties.Size > VaultCrypto.MaxEnvelopeBytes + 1024 * 1024) throw new InvalidDataException("Файл экспорта слишком велик.");
-        var json = await File.ReadAllTextAsync(file.Path); RequireSession(captured);
+        if (properties.Size > ExportPackage.MaxPackageBytes) throw new InvalidDataException("Файл экспорта слишком велик.");
+        string json;
+        using (var input = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
+            json = await ExportPackage.ReadTextAsync(input);
+        RequireSession(captured);
         _ = ExportPackage.Read(json); // Check SHA-256 before asking for a password or changing any local data.
         var password = await AskPassword("Импорт резервной копии", false); if (password is null) return;
         var imported = await Task.Run(() => VaultSession.ReadExport(json, password)); password = ""; RequireSession(captured);
@@ -413,10 +424,11 @@ public sealed partial class MainWindow : Window
     };
     private void ApplyAppearance()
     {
-        if (applyingAppearance) return;
+        if (applyingAppearance || exiting) return;
         applyingAppearance = true;
         try
         {
+        AppDiagnostics.Journal.Record(AppEvent.AppearanceApplying);
         var settings = appearancePreview ?? ViewModel.Settings;
         var palette = ThemeService.Apply(Root, settings);
         var titleBar = AppWindow.TitleBar;
@@ -429,6 +441,7 @@ public sealed partial class MainWindow : Window
         titleBar.ButtonPressedBackgroundColor = ThemeService.ParseColor(palette.Control);
         titleBar.ButtonPressedForegroundColor = ThemeService.ParseColor(palette.Foreground);
         motion.Reset(Root); motion.Wire(Root);
+        AppDiagnostics.Journal.Record(AppEvent.AppearanceApplied);
         }
         finally { applyingAppearance = false; }
     }
@@ -455,6 +468,12 @@ public sealed partial class MainWindow : Window
     private async void SaveSettings_Click(object sender, RoutedEventArgs e) => await Run(() =>
     {
         ViewModel.SaveSettings(ReadSettings()); appearancePreview = null; ApplyAppearance(); Notify("Настройки сохранены"); return Task.CompletedTask;
+    });
+    private async void OpenDiagnostics_Click(object sender, RoutedEventArgs e) => await Run(() =>
+    {
+        var folder = AppDiagnostics.Journal.DirectoryPath; Directory.CreateDirectory(folder);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo { FileName = folder, UseShellExecute = true });
+        return Task.CompletedTask;
     });
     private void ResetAppearance_Click(object sender, RoutedEventArgs e)
     {
@@ -485,6 +504,7 @@ public sealed partial class MainWindow : Window
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         var opening = SettingsPanel.Visibility != Visibility.Visible;
+        AppDiagnostics.Journal.Record(opening ? AppEvent.SettingsOpened : AppEvent.SettingsClosed);
         if (opening) { LoadSettings(); navigationWasOpen = Navigation.IsPaneOpen; Navigation.IsPaneOpen = false; SettingsPanel.Visibility = Visibility.Visible; motion.Enter(SettingsPanel); }
         else { SettingsPanel.Visibility = Visibility.Collapsed; Navigation.IsPaneOpen = navigationWasOpen; appearancePreview = null; ApplyAppearance(); }
     }
@@ -503,7 +523,7 @@ public sealed partial class MainWindow : Window
         var text = new TextBlock
         {
             MaxWidth = 620, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
-            Text = "БЫСТРЫЙ СТАРТ\n\n1. Создайте мастер-пароль от 12 символов. Сохраните его в надёжном месте.\n2. Нажмите «Новая ассоциация»: например, GitHub или почта.\n3. Раскройте карточку → «Добавить поле». Полей может быть сколько угодно: логин, пароль, PublicKey, заметка, изображение или файл. В зоне вложения можно перетащить один файл. Для картинки доступны «Вставить из буфера» и Ctrl+V вне текстового поля описания.\n4. Нажмите значение или кнопку копирования. Картинка одновременно копируется и открывается крупно.\n5. В меню слева → «Экспорт»: сохраните зашифрованный .smvault с отдельным паролем. На другом компьютере создайте локальное хранилище → «Импорт».\n\nПОИСК\n\nИщет только названия, без учёта регистра. Можно вводить начало слова или несколько слов. Достаточно совпадения любого из них: «Почта Mail» найдёт и «Почта 1», и «Mail». Кириллица поддерживается. В настройках можно включить раскрытие только одной карточки. Значения полей в поиск не попадают.\n\nКАК ЗАЩИЩЕНЫ ДАННЫЕ?\n\nSQLite содержит зашифрованные названия, описания, значения и вложения. Файлы сначала преобразуются в base64, затем шифруются. Base64 не является защитой. Экспорт проверяется по SHA-256, затем по тегу AES-GCM: пересчёт хешсуммы не позволяет подменить данные.\n\nЧТО ДЕЛАЕТ ИМПОРТ?\n\nОбъединяет ассоциации. При совпадении идентификатора или названия предложит оставить локальную, заменить её или сохранить обе. До разрешения всех конфликтов база не меняется. Настройки внешнего вида и блокировки устройства сохраняются локальными.\n\nЗАБЫЛ МАСТЕР-ПАРОЛЬ\n\nВосстановления нет. Создайте хранилище на другом устройстве и импортируйте резервную копию с известным паролем экспорта. Регулярно делайте резервные копии.\n\nБЛОКИРОВКА И ТРЕЙ\n\nCtrl+L блокирует сразу, Ctrl+F переводит фокус в поиск. По умолчанию окно блокируется после 5 минут без фокуса. Крестик скрывает окно в трей и блокирует сразу. Значок: жёлтый замок — заблокировано, зелёный — открыто. Левый клик возвращает окно; правый клик → «Выйти» завершает процесс. Таймеры и поведение крестика настраиваются, 0 отключает таймер. Блокировка Windows также блокирует хранилище.\n\nБУФЕР И ФАЙЛЫ\n\nБуфер очищается через 30 секунд, только если в нём остались наши данные. История и облачный буфер Windows отключены для этих копирований. При блокировке данные приложения в буфере очищаются. Другие программы могут успеть прочитать буфер раньше. Для копирования произвольного файла создаётся временный файл в LocalAppData, который удаляется при очистке. Вложение: до 10 МБ, снимок: до 64 МБ. Предпросмотр: PNG/JPEG до 40 Мп.\n\nТЕМЫ И АНИМАЦИИ\n\nНастройки справа: системная, светлая, тёмная, полночь, лесная или собственная тема. Собственная тема позволяет выбрать фон и акцент. Шрифт, размер, скругления и плотность доступны во всех темах. Изменения оформления видны сразу; «Сохранить настройки» закрепляет их. Закрытие панели отменяет несохранённый предпросмотр. Декоративные анимации: выключены, умеренные, максимальные. Скорость регулируется у подсветки и пружинного отклика при наведении и нажатии. Раскрытие и сворачивание карточек, появление содержимого и стандартные состояния элементов имеют постоянный темп. Системное отключение движения имеет приоритет.\n\nГДЕ ДАННЫЕ?\n\n%LocalAppData%\\SecretManager\\vault.db. Удаление программы сохраняет хранилище. Приложение работает локально и не отправляет ваши секреты в сеть. Почтового входа нет."
+            Text = "БЫСТРЫЙ СТАРТ\n\n1. Создайте мастер-пароль от 12 символов. Сохраните его в надёжном месте.\n2. Нажмите «Новая ассоциация»: например, GitHub или почта.\n3. Раскройте карточку → «Добавить поле». Полей может быть сколько угодно: логин, пароль, PublicKey, заметка, изображение или файл. В зоне вложения можно перетащить один файл. Для картинки доступны «Вставить из буфера» и Ctrl+V вне текстового поля описания.\n4. Нажмите значение или кнопку копирования. Картинка одновременно копируется и открывается крупно.\n5. В меню слева → «Экспорт»: сохраните зашифрованный .smvault с отдельным паролем. На другом компьютере создайте локальное хранилище → «Импорт».\n\nПОИСК\n\nИщет только названия, без учёта регистра. Можно вводить начало слова или несколько слов. Достаточно совпадения любого из них: «Почта Mail» найдёт и «Почта 1», и «Mail». Кириллица поддерживается. В настройках можно включить раскрытие только одной карточки. Значения полей в поиск не попадают.\n\nКАК ЗАЩИЩЕНЫ ДАННЫЕ?\n\nSQLite содержит зашифрованные названия, описания, значения и вложения. Файлы сначала преобразуются в base64, затем шифруются. Base64 не является защитой. Экспорт проверяется по SHA-256, затем по тегу AES-GCM: пересчёт хешсуммы не позволяет подменить данные.\n\nЧТО ДЕЛАЕТ ИМПОРТ?\n\nОбъединяет ассоциации. При совпадении идентификатора или названия предложит оставить локальную, заменить её или сохранить обе. До разрешения всех конфликтов база не меняется. Настройки внешнего вида и блокировки устройства сохраняются локальными.\n\nЗАБЫЛ МАСТЕР-ПАРОЛЬ\n\nВосстановления нет. Создайте хранилище на другом устройстве и импортируйте резервную копию с известным паролем экспорта. Регулярно делайте резервные копии.\n\nБЛОКИРОВКА И ТРЕЙ\n\nCtrl+L блокирует сразу, Ctrl+F переводит фокус в поиск. По умолчанию окно блокируется после 5 минут без фокуса. Крестик скрывает окно в трей и блокирует сразу. Значок: жёлтый замок — заблокировано, зелёный — открыто. Левый клик возвращает окно; правый клик → «Выйти» завершает процесс. Таймеры и поведение крестика настраиваются, 0 отключает таймер. Блокировка Windows также блокирует хранилище.\n\nБУФЕР И ФАЙЛЫ\n\nБуфер очищается через 30 секунд, только если в нём остались наши данные. История и облачный буфер Windows отключены для этих копирований. При блокировке данные приложения в буфере очищаются. Другие программы могут успеть прочитать буфер раньше. Для копирования произвольного файла создаётся временный файл в LocalAppData, который удаляется при очистке. Вложение: до 10 МБ, снимок: до 64 МБ. Предпросмотр: PNG/JPEG до 40 Мп.\n\nТЕМЫ И АНИМАЦИИ\n\nНастройки справа: системная, светлая, тёмная, полночь, лесная или собственная тема. Собственная тема позволяет выбрать фон и акцент. Шрифт, размер, скругления и плотность доступны во всех темах. Изменения оформления видны сразу; «Сохранить настройки» закрепляет их. Закрытие панели отменяет несохранённый предпросмотр. Декоративные анимации: выключены, умеренные, максимальные. Скорость регулируется у подсветки и пружинного отклика при наведении и нажатии. Раскрытие и сворачивание карточек, появление содержимого и стандартные состояния элементов имеют постоянный темп. Системное отключение движения имеет приоритет.\n\nЖУРНАЛ ОШИБОК\n\nНастройки → «Открыть папку журналов». Файлы application.log и application.previous.log содержат время UTC, версию, названия операций, типы и коды ошибок. Содержимое хранилища и сообщения исключений не записываются. Запись PreviousRunInterrupted при следующем запуске означает незавершённый предыдущий сеанс; это также возможно после отключения питания или принудительного завершения. Нативные аварии дополнительно попадают в журнал приложений Windows.\n\nГДЕ ДАННЫЕ?\n\n%LocalAppData%\\SecretManager\\vault.db. Удаление программы сохраняет хранилище. Приложение работает локально и не отправляет ваши секреты в сеть. Почтового входа нет."
         };
         var dialog = Dialog("Инструкция и FAQ", new ScrollViewer { Content = text, MaxHeight = 580 });
         dialog.Resources["ContentDialogMaxWidth"] = 720d;
@@ -511,20 +531,22 @@ public sealed partial class MainWindow : Window
     });
 
     private void CheckFocusTimeout()
-    { if (ViewModel.IsUnlocked && focus.ShouldLock(DateTimeOffset.UtcNow, ViewModel.Settings.AutoLockMinutes)) ViewModel.Lock(); }
+    { if (!exiting && ViewModel.IsUnlocked && focus.ShouldLock(DateTimeOffset.UtcNow, ViewModel.Settings.AutoLockMinutes)) ViewModel.Lock(); }
     private void Window_Activated(object sender, WindowActivatedEventArgs args)
     {
+        if (exiting) return;
         var focused = args.WindowActivationState != WindowActivationState.Deactivated;
         if (focused) CheckFocusTimeout(); // Check before resetting elapsed unfocused time.
         isFocused = focused; focus.SetFocused(focused, DateTimeOffset.UtcNow);
     }
     private void ShowWindow()
-    { CheckFocusTimeout(); AppWindow.Show(); NativeMethods.Show(hwnd); Activate(); }
+    { if (exiting) return; AppDiagnostics.Journal.Record(AppEvent.WindowShown); CheckFocusTimeout(); AppWindow.Show(); NativeMethods.Show(hwnd); Activate(); }
     private void AppWindow_Closing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (!exiting && ViewModel.Settings.CloseToTray)
         {
             args.Cancel = true;
+            AppDiagnostics.Journal.Record(AppEvent.WindowHidden);
             if (ViewModel.Settings.LockWhenHidden) ViewModel.Lock();
             focus.SetFocused(false, DateTimeOffset.UtcNow); isFocused = false; AppWindow.Hide();
         }
@@ -533,20 +555,25 @@ public sealed partial class MainWindow : Window
     private void SystemEvents_SessionSwitch(object sender, SessionSwitchEventArgs e)
     {
         if (e.Reason is SessionSwitchReason.SessionLock or SessionSwitchReason.SessionLogoff or SessionSwitchReason.RemoteDisconnect)
-            DispatcherQueue.TryEnqueue(() => ViewModel.Lock());
+            DispatcherQueue.TryEnqueue(() => { if (!exiting) ViewModel.Lock(); });
     }
     private async void ExitApplication()
     {
         if (exiting) return;
         exiting = true;
+        AppDiagnostics.Journal.Record(AppEvent.ExitRequested);
         ViewModel.Lock();
         await clipboard.ClearOwnedAsync();
+        // Keep the dispatcher alive until password verification and its binding
+        // notifications have completed, so their continuation cannot target a dead UI.
+        while (ViewModel.IsBusy) await Task.Delay(20);
         // WinUI #11653: a focused text/password input can crash framework teardown.
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         { UnlockButton.IsEnabled = true; UnlockButton.Focus(FocusState.Programmatic); Close(); });
     }
     private void Window_Closed(object sender, WindowEventArgs args)
     {
+        exiting = true;
         timer.Stop(); SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
         ViewModel.SessionChanged -= UpdateSession; ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         activeDialog?.Hide(); ViewModel.Lock(); ViewModel.Dispose();

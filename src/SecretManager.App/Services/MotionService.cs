@@ -38,7 +38,7 @@ public sealed class MotionService(Func<AppSettings> settings)
     }
     private void Scale(FrameworkElement element, float value, bool hover)
     {
-        if (!Enabled || settings().AnimationLevel != AnimationLevel.Maximum) return;
+        if (!element.IsLoaded || element.XamlRoot is null || !Enabled || settings().AnimationLevel != AnimationLevel.Maximum) return;
         if (element is Expander && value > 1) value = MotionGeometry.CardHoverScale(element.ActualWidth);
         var visual = ElementCompositionPreview.GetElementVisual(element);
         visual.CenterPoint = new Vector3((float)element.ActualWidth / 2, (float)element.ActualHeight / 2, 0);
@@ -50,7 +50,7 @@ public sealed class MotionService(Func<AppSettings> settings)
     }
     public void Enter(FrameworkElement element, int stagger = 0)
     {
-        if (!Enabled) return;
+        if (element.XamlRoot is null || !Enabled) return;
         var visual = ElementCompositionPreview.GetElementVisual(element);
         var fade = visual.Compositor.CreateScalarKeyFrameAnimation();
         fade.InsertKeyFrame(0, 0); fade.InsertKeyFrame(1, 1);
@@ -70,7 +70,7 @@ public sealed class MotionService(Func<AppSettings> settings)
     }
     public void Reset(DependencyObject root)
     {
-        if (root is FrameworkElement element)
+        if (root is FrameworkElement element && element.XamlRoot is not null)
         {
             var visual = ElementCompositionPreview.GetElementVisual(element);
             visual.StopAnimation("Scale"); visual.StopAnimation("Opacity");

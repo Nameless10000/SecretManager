@@ -135,7 +135,7 @@
       <ToggleSwitch x:Name="SingleExpandedChoice" Header="Только одна раскрытая ассоциация"/>
       <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
       <TextBlock Text="Движение и отклик" FontSize="16" FontWeight="SemiBold"/>
-      <ComboBox x:Name="AnimationChoice" Header="Количество анимаций" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Отключить анимации</x:String><x:String>Умеренные</x:String><x:String>Максимальная анимированность</x:String></ComboBox>
+      <ComboBox x:Name="AnimationChoice" Header="Декоративные анимации" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Отключить эффекты</x:String><x:String>Умеренные</x:String><x:String>Максимальная анимированность</x:String></ComboBox>
       <TextBlock Text="Максимум: пружины, появление карточек и анимация наведения. Системная настройка отключения движения имеет приоритет." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
       <TextBlock Text="Скорость отклика при наведении и нажатии" FontSize="12"/>
       <Slider x:Name="MotionSpeedChoice" Minimum="0.5" Maximum="2" StepFrequency="0.1" ValueChanged="AppearanceSlider_Changed"/>
@@ -148,6 +148,10 @@
       <TextBlock Text="0 отключает соответствующий таймер." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
       <ToggleSwitch x:Name="TrayChoice" Header="Закрытие крестиком — в трей"/>
       <ToggleSwitch x:Name="LockHiddenChoice" Header="Сразу блокировать при уходе в трей"/>
+      <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
+      <TextBlock Text="Диагностика" FontSize="16" FontWeight="SemiBold"/>
+      <Button Content="Открыть папку журналов" Click="OpenDiagnostics_Click" HorizontalAlignment="Stretch"/>
+      <TextBlock Text="Время, версия, операции и коды ошибок. Названия, значения полей, пароли и вложения в журнал не записываются." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
       <Button Content="Сбросить оформление" Click="ResetAppearance_Click" HorizontalAlignment="Stretch"/>
      </StackPanel></ScrollViewer>
      <Button Grid.Row="2" Content="Сохранить настройки" HorizontalAlignment="Stretch" Style="{StaticResource AccentButtonStyle}" Click="SaveSettings_Click"/>

@@ -11,7 +11,7 @@ try {
     New-Item -ItemType Directory -Force -Path $output | Out-Null
     for ($iteration = 1; $iteration -le $Iterations; $iteration++) {
         Write-Output "Native WinUI process check $iteration/$Iterations"
-        foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt')) {
+        foreach ($name in @('result.json', 'failure.png', 'teardown-stage.txt', 'usage-stage.txt')) {
             $previous = Join-Path $output $name
             if (Test-Path -LiteralPath $previous) { Remove-Item -LiteralPath $previous }
         }
@@ -20,7 +20,7 @@ try {
         $process = Start-Process -FilePath $checkExecutable -WindowStyle Hidden -PassThru
         # Retain the process handle so its exit code stays available after shutdown.
         $null = $process.Handle
-        if (-not $process.WaitForExit(45000)) { $process.Kill(); throw 'Theme checks exceeded 45 seconds.' }
+        if (-not $process.WaitForExit(90000)) { $process.Kill(); throw 'WinUI scenario checks exceeded 90 seconds.' }
         $process.WaitForExit()
         $exitCode = $process.ExitCode
         $report = Join-Path $output 'result.json'
@@ -29,6 +29,8 @@ try {
         if ($exitCode -ne 0 -or -not $result.Passed) {
             $stage = Join-Path $output 'teardown-stage.txt'
             if (Test-Path -LiteralPath $stage) { Get-Content -LiteralPath $stage | Write-Output }
+            $usageStage = Join-Path $output 'usage-stage.txt'
+            if (Test-Path -LiteralPath $usageStage) { Get-Content -LiteralPath $usageStage | Write-Output }
             try {
                 Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-5);Level=2} -ErrorAction Stop |
                     Where-Object Message -Like '*SecretManager.ThemeChecks*' | Select-Object -First 2 -ExpandProperty Message | Write-Output

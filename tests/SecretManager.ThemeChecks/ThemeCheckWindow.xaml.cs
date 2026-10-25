@@ -75,6 +75,7 @@ public sealed partial class ThemeCheckWindow : Window
             await Snapshot("toast-overlay.png");
             await Task.Delay(2200);
             Check(!Toast.IsOpen && Toast.Message == "", "Toast did not dismiss after two seconds.");
+            var usageChecks = await UsageChecks.RunAsync(output);
             var nativeTimings = Descendants(Root).OfType<FrameworkElement>()
                 .SelectMany(VisualStateManager.GetVisualStateGroups).SelectMany(g => g.States)
                 .Select(s => s.Storyboard).OfType<Microsoft.UI.Xaml.Media.Animation.Storyboard>().Distinct()
@@ -121,7 +122,8 @@ public sealed partial class ThemeCheckWindow : Window
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 4, NativeControls = true, IconFonts = true, HoverGutters = true,
                 ToastOverlay = true, ToastAutoDismiss = true, HoverBrushTransitions = true, FixedControlTimings = true, ExpanderTransitions = 6,
-                ToggleChecks = toggleChecks, SystemMotionDisabled = true, AttachmentChecks = attachmentChecks }));
+                ToggleChecks = toggleChecks, SystemMotionDisabled = true, AttachmentChecks = attachmentChecks, UsageChecks = usageChecks,
+                LateCloseCompletion = true, CloseDuringUnlock = true }));
             Environment.ExitCode = 0;
         }
         catch (Exception ex)
@@ -184,7 +186,7 @@ public sealed partial class ThemeCheckWindow : Window
         }
         finally { CompactToggle.Toggled -= Preview; ThemeService.Apply(Root, new()); }
     }
-    private static void CheckToggle(ToggleSwitch control)
+    internal static void CheckToggle(ToggleSwitch control)
     {
         var visuals = Descendants(control).OfType<FrameworkElement>().Where(e => e.Name.Length > 0)
             .GroupBy(e => e.Name).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);

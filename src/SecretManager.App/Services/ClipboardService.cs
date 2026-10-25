@@ -9,7 +9,7 @@ public sealed class ClipboardService : IDisposable
 {
     private const string OwnerFormat = "SecretManager.ClipboardOwner";
     private readonly DispatcherTimer timer = new();
-    private readonly string folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SecretManager", "Clipboard");
+    private readonly string folder = Path.Combine(AppPaths.DataDirectory, "Clipboard");
     private string? token;
     private DateTimeOffset expires;
     private InMemoryRandomAccessStream? bitmapStream;
