@@ -16,11 +16,16 @@ try {
     $env:SECRETMANAGER_THEME_CHECK_OUTPUT = $output
     $checkExecutable = Join-Path $projectRoot 'tests\SecretManager.ThemeChecks\bin\x64\Release\net10.0-windows10.0.19041.0\win-x64\SecretManager.ThemeChecks.exe'
     $process = Start-Process -FilePath $checkExecutable -WindowStyle Hidden -PassThru
+    # Keep the native process handle while it is alive; some PowerShell/.NET versions
+    # otherwise lose access to ExitCode after a short-lived WinUI process terminates.
+    $null = $process.Handle
     if (-not $process.WaitForExit(45000)) { $process.Kill(); throw 'Theme checks exceeded 45 seconds.' }
+    $process.WaitForExit()
+    $exitCode = $process.ExitCode
     $report = Join-Path $output 'result.json'
     if (-not (Test-Path -LiteralPath $report)) { throw 'Theme checks produced no report.' }
     $result = Get-Content -Raw -LiteralPath $report | ConvertFrom-Json
-    if ($process.ExitCode -ne 0 -or -not $result.Passed) { throw ($result | ConvertTo-Json -Depth 4) }
+    if ($exitCode -ne 0 -or -not $result.Passed) { throw ("Theme process exit code: $exitCode`n" + ($result | ConvertTo-Json -Depth 4)) }
     $result | ConvertTo-Json
 }
 finally { Remove-Item Env:SECRETMANAGER_THEME_CHECK_OUTPUT -ErrorAction SilentlyContinue; Pop-Location }
