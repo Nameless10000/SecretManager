@@ -53,9 +53,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Lock()
     {
         generation++;
-        session.Lock(); Associations.Clear(); query = "";
+        session.Lock();
+        // Collection/property bindings read CountLabel synchronously. Publish a consistent
+        // locked state before clearing the collection; the session is already closed.
+        unlocked = false;
+        Associations.Clear(); query = "";
+        OnPropertyChanged(nameof(IsUnlocked));
         OnPropertyChanged(nameof(Query)); OnPropertyChanged(nameof(TotalCount)); OnPropertyChanged(nameof(CountLabel));
-        IsUnlocked = false; Status = "Хранилище заблокировано";
+        Status = "Хранилище заблокировано";
+        SessionChanged?.Invoke();
     }
 
     public void Refresh()

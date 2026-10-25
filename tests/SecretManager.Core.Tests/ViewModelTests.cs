@@ -70,6 +70,35 @@ public sealed class ViewModelTests : IDisposable
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LockNotifiesBindingsOnlyAfterTheLockedStateIsConsistent(bool keyboardPath)
+    {
+        using var vm = new MainViewModel(Database); await vm.UnlockAsync(Password, Password);
+        var topic = new SecretAssociation { Title = "Сохраняется после блокировки", Fields = [new() { Description = "Логин", Value = "demo@example.invalid" }] };
+        vm.SaveAssociation(topic);
+        var observingLock = true;
+        var reads = 0;
+        void ReadLikeBinding()
+        {
+            if (!observingLock) return;
+            // XAML reads these immediately when PropertyChanged / CollectionChanged fires.
+            var label = vm.CountLabel;
+            var total = vm.TotalCount;
+            Assert.False(vm.IsUnlocked); Assert.Equal(0, total); Assert.Contains("из 0", label); reads++;
+        }
+        vm.PropertyChanged += (_, _) => ReadLikeBinding();
+        vm.Associations.CollectionChanged += (_, _) => ReadLikeBinding();
+        if (keyboardPath) vm.Lock(); else vm.LockCommand.Execute(null);
+        vm.Lock(); // Repeated tray / timer requests must also be safe.
+        Assert.True(reads > 0); observingLock = false;
+        Assert.Empty(vm.Associations);
+        await vm.UnlockAsync(Password, "");
+        Assert.Equal(topic.Id, Assert.Single(vm.Associations).Model.Id);
+        Assert.Equal("demo@example.invalid", vm.Associations[0].Fields[0].Model.Value);
+    }
+
+    [Theory]
     [InlineData("#GGGGGG")]
     [InlineData("red")]
     public void MalformedCustomThemeIsRejected(string color) => Assert.Throws<InvalidDataException>(() =>
