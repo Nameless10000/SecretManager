@@ -74,8 +74,19 @@ public sealed partial class ThemeCheckWindow : Window
             await Snapshot("toast-overlay.png");
             await Task.Delay(2200);
             Check(!Toast.IsOpen && Toast.Message == "", "Toast did not dismiss after two seconds.");
+            var motionSettings = new AppSettings { AnimationLevel = AnimationLevel.Maximum };
+            var motion = new MotionService(() => motionSettings);
+            motion.Wire(Root);
+            var iconSurface = Descendants(AccentButton).OfType<ContentPresenter>().First();
+            Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(180) : iconSurface.BackgroundTransition is null, "Hover background transition ignores the system motion setting.");
+            motionSettings = motionSettings with { AnimationLevel = AnimationLevel.Off }; motion.Wire(Root);
+            Check(iconSurface.BackgroundTransition is null, "Disabled animations still transition the hover background.");
+            motionSettings = motionSettings with { AnimationLevel = AnimationLevel.Medium, MotionSpeed = 2 }; motion.Wire(Root);
+            Check(motion.Enabled ? iconSurface.BackgroundTransition?.Duration == TimeSpan.FromMilliseconds(60) : iconSurface.BackgroundTransition is null, "Hover transition ignores animation speed or system settings.");
+            var attachmentChecks = await AttachmentChecks.RunAsync(Card, output, Snapshot);
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
-            { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 1, NativeControls = true, IconFonts = true, HoverGutters = true, ToastOverlay = true, ToastAutoDismiss = true }));
+            { Passed = true, ThemeTransitions = count, Snapshots = cases.Length + 3, NativeControls = true, IconFonts = true, HoverGutters = true,
+                ToastOverlay = true, ToastAutoDismiss = true, HoverBrushTransitions = true, AttachmentChecks = attachmentChecks }));
             Environment.ExitCode = 0;
         }
         catch (Exception ex)

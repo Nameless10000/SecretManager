@@ -79,7 +79,8 @@ public sealed class ClipboardService : IDisposable
                     Windows.ApplicationModel.DataTransfer.Clipboard.Clear();
             }
         }
-        catch (System.Runtime.InteropServices.COMException) { /* Another application may hold the clipboard. */ }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or UnauthorizedAccessException or InvalidOperationException)
+        { /* Another application or the Windows lock screen may hold the clipboard. */ }
         finally
         {
             token = null; bitmapStream?.Dispose(); bitmapStream = null;

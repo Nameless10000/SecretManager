@@ -132,6 +132,7 @@
       <TextBlock Text="Скругление карточек" FontSize="12"/>
       <Slider x:Name="RadiusChoice" Minimum="0" Maximum="28" StepFrequency="1" ValueChanged="AppearanceSlider_Changed"/>
       <ToggleSwitch x:Name="CompactChoice" Header="Компактный список" Toggled="AppearanceToggle_Changed"/>
+      <ToggleSwitch x:Name="SingleExpandedChoice" Header="Только одна раскрытая ассоциация"/>
       <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
       <TextBlock Text="Движение и отклик" FontSize="16" FontWeight="SemiBold"/>
       <ComboBox x:Name="AnimationChoice" Header="Количество анимаций" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Отключить анимации</x:String><x:String>Умеренные</x:String><x:String>Максимальная анимированность</x:String></ComboBox>

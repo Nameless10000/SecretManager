@@ -55,9 +55,26 @@ public sealed class ViewModelTests : IDisposable
         using var vm = new MainViewModel(Database); await vm.UnlockAsync(Password, Password);
         var settings = new AppSettings { Theme = theme, AnimationLevel = animation, FontFamily = "Consolas", FontSize = 17,
             CornerRadius = 22, AccentColor = "#12ab34", BackgroundColor = "#111A22", CompactLayout = true,
-            AutoLockMinutes = 7, ClipboardClearSeconds = 45, MotionSpeed = 1.5, CloseToTray = false };
+            AutoLockMinutes = 7, ClipboardClearSeconds = 45, MotionSpeed = 1.5, CloseToTray = false, SingleExpandedAssociation = false };
         vm.SaveSettings(settings); vm.Lock(); await vm.UnlockAsync(Password, "");
         Assert.Equal(settings, vm.Settings);
+    }
+
+    [Fact]
+    public async Task AccordionCanBeDisabledAndEnablingItKeepsTheLastOpenedCard()
+    {
+        using var vm = new MainViewModel(Database); await vm.UnlockAsync(Password, Password);
+        vm.SaveAssociation(new() { Title = "А" }); vm.SaveAssociation(new() { Title = "Б" });
+        Assert.True(vm.Settings.SingleExpandedAssociation);
+        vm.Associations[0].IsExpanded = true; vm.Associations[1].IsExpanded = true;
+        Assert.False(vm.Associations[0].IsExpanded); Assert.True(vm.Associations[1].IsExpanded);
+        vm.SaveSettings(vm.Settings with { SingleExpandedAssociation = false });
+        vm.Associations[0].IsExpanded = true; Assert.All(vm.Associations, a => Assert.True(a.IsExpanded));
+        vm.SaveSettings(vm.Settings with { SingleExpandedAssociation = true });
+        Assert.True(vm.Associations[0].IsExpanded); Assert.False(vm.Associations[1].IsExpanded);
+        vm.SaveAssociation(vm.Associations[0].Model with { Title = "А новая" });
+        Assert.Single(vm.Associations, a => a.IsExpanded);
+        vm.Lock(); await vm.UnlockAsync(Password, ""); Assert.All(vm.Associations, a => Assert.False(a.IsExpanded));
     }
 
     [Fact]

@@ -37,6 +37,7 @@ public sealed record AppSettings
     public double FontSize { get; init; } = 14;
     public double CornerRadius { get; init; } = 14;
     public bool CompactLayout { get; init; }
+    public bool SingleExpandedAssociation { get; init; } = true;
 }
 
 public sealed record VaultDocument

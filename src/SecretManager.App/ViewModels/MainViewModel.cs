@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using SecretManager.Core.Models;
 using SecretManager.Core.Services;
 using SecretManager.Core.Storage;
@@ -15,6 +16,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool busy;
     private string status = "";
     private int generation;
+    private Guid? lastExpanded;
     private AppSettings settings = new();
     public MainViewModel(string path)
     {
@@ -57,7 +59,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         // Collection/property bindings read CountLabel synchronously. Publish a consistent
         // locked state before clearing the collection; the session is already closed.
         unlocked = false;
-        Associations.Clear(); query = "";
+        DetachAssociations(); Associations.Clear(); query = ""; lastExpanded = null;
         OnPropertyChanged(nameof(IsUnlocked));
         OnPropertyChanged(nameof(Query)); OnPropertyChanged(nameof(TotalCount)); OnPropertyChanged(nameof(CountLabel));
         Status = "Хранилище заблокировано";
@@ -67,10 +69,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public void Refresh()
     {
         var expanded = Associations.Where(a => a.IsExpanded).Select(a => a.Model.Id).ToHashSet();
+        DetachAssociations();
         Associations.Clear();
-        foreach (var a in session.Search(Query)) Associations.Add(new(a) { IsExpanded = expanded.Contains(a.Id) });
+        foreach (var a in session.Search(Query))
+        {
+            var item = new AssociationViewModel(a);
+            item.PropertyChanged += AssociationChanged;
+            Associations.Add(item); item.IsExpanded = expanded.Contains(a.Id);
+        }
         OnPropertyChanged(nameof(TotalCount)); OnPropertyChanged(nameof(CountLabel));
     }
+
+    private void AssociationChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(AssociationViewModel.IsExpanded) || sender is not AssociationViewModel { IsExpanded: true } opened) return;
+        lastExpanded = opened.Model.Id;
+        if (Settings.SingleExpandedAssociation)
+            foreach (var item in Associations) if (!ReferenceEquals(item, opened)) item.IsExpanded = false;
+    }
+    private void DetachAssociations()
+    { foreach (var item in Associations) item.PropertyChanged -= AssociationChanged; }
 
     public void SaveAssociation(SecretAssociation association)
     {
@@ -97,11 +115,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public void SaveSettings(AppSettings next)
-    { session.Save(session.Document with { Settings = next }); Settings = next; }
+    {
+        session.Save(session.Document with { Settings = next }); Settings = next;
+        if (next.SingleExpandedAssociation)
+        {
+            var keep = Associations.FirstOrDefault(a => a.IsExpanded && a.Model.Id == lastExpanded) ?? Associations.FirstOrDefault(a => a.IsExpanded);
+            foreach (var item in Associations) if (!ReferenceEquals(item, keep)) item.IsExpanded = false;
+        }
+    }
     public Task ChangePasswordAsync(string oldPassword, string newPassword) => Task.Run(() => session.ChangePassword(oldPassword, newPassword));
     public Task<string> ExportAsync(string password) => Task.Run(() => session.Export(password));
     public IReadOnlyList<ImportConflict> FindConflicts(VaultDocument imported) => VaultMerge.FindConflicts(session.Document, imported);
     public void Import(VaultDocument imported, IReadOnlyDictionary<Guid, ConflictResolution> choices)
     { session.Save(VaultMerge.Merge(session.Document, imported, choices)); Refresh(); }
-    public void Dispose() => session.Dispose();
+    public void Dispose() { DetachAssociations(); session.Dispose(); }
 }

@@ -15,6 +15,11 @@ public sealed class MotionService(Func<AppSettings> settings)
     public bool Enabled => settings().AnimationLevel != AnimationLevel.Off && system.AnimationsEnabled;
     public void Wire(DependencyObject root)
     {
+        var transition = Enabled ? new BrushTransition { Duration = TimeSpan.FromMilliseconds(
+            (settings().AnimationLevel == AnimationLevel.Maximum ? 180 : 120) / settings().MotionSpeed) } : null;
+        if (root is ContentPresenter presenter) presenter.BackgroundTransition = transition;
+        if (root is Panel panel) panel.BackgroundTransition = transition;
+        if (root is Border border) border.BackgroundTransition = transition;
         if (root is FrameworkElement stateRoot)
         {
             foreach (var group in VisualStateManager.GetVisualStateGroups(stateRoot))
