@@ -29,7 +29,7 @@ public sealed class TitleSearchIndex : IDisposable
             .Select(m => m.Value).Take(32).ToArray();
         using var command = connection.CreateCommand();
         command.CommandText = tokens.Length == 0 ? "SELECT id FROM titles" : "SELECT id FROM titles WHERE titles MATCH $query";
-        if (tokens.Length > 0) command.Parameters.AddWithValue("$query", string.Join(" AND ", tokens.Select(t => $"\"{t}\"*")));
+        if (tokens.Length > 0) command.Parameters.AddWithValue("$query", string.Join(" OR ", tokens.Select(t => $"\"{t}\"*")));
         var results = new HashSet<Guid>();
         using var reader = command.ExecuteReader();
         while (reader.Read()) results.Add(Guid.Parse(reader.GetString(0)));

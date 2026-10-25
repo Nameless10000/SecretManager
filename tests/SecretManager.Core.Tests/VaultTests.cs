@@ -72,6 +72,21 @@ public sealed class VaultTests : IDisposable
     }
 
     [Fact]
+    public void SearchReturnsAssociationsMatchingAnyWordAcrossCyrillicAndLatinTitles()
+    {
+        using var session = new VaultSession(Repository); session.Create(Password);
+        var first = new SecretAssociation { Title = "Почта 1" };
+        var second = new SecretAssociation { Title = "Mail" };
+        var third = new SecretAssociation { Title = "Bank", Fields = [new() { Description = "Примечание", Value = "Почта Mail" }] };
+        session.Save(new() { Associations = [first, second, third] });
+        var matches = session.Search("ПОЧТА mail").Select(a => a.Id).ToHashSet();
+        Assert.True(matches.SetEquals([first.Id, second.Id]));
+        Assert.Equal(2, session.Search("поч MAI").Count);
+        Assert.Single(session.Search("mail unknownword"));
+        Assert.Empty(session.Search("неизвестно missing"));
+    }
+
+    [Fact]
     public void ExportIsPortableAndUsesAnIndependentPasswordAndContext()
     {
         using var session = new VaultSession(Repository); session.Create(Password); session.Save(Sample());
