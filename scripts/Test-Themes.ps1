@@ -34,6 +34,10 @@ try {
             Get-WinEvent -FilterHashtable @{LogName='Application'; StartTime=(Get-Date).AddMinutes(-5);Level=2} -ErrorAction Stop |
                 Where-Object Message -Like '*SecretManager.ThemeChecks*' | Select-Object -First 2 -ExpandProperty Message | Write-Output
         } catch { Write-Output 'Windows crash diagnostics unavailable.' }
+        if ($env:GITHUB_ACTIONS -eq 'true') {
+            try { & (Join-Path $PSScriptRoot 'Trace-WinUiFailure.ps1') -Executable $checkExecutable -Output $output }
+            catch { Write-Output "Native dump analysis failed: $_" }
+        }
         throw ("Theme process exit code: $exitCode`n" + ($result | ConvertTo-Json -Depth 4))
     }
     $result | ConvertTo-Json
