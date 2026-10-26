@@ -42,7 +42,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
     $installer = Join-Path $installerFolder 'SecretManager-Setup.exe'
     $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-    [IO.File]::WriteAllText((Join-Path $installerFolder 'SecretManager-Setup.sha256'), "$hash  SecretManager-Setup.exe`n")
+    $installerVersion = ([version](Get-Item -LiteralPath $installer).VersionInfo.FileVersion.Trim()).ToString(3)
+    $installerSize = (Get-Item -LiteralPath $installer).Length
+    [IO.File]::WriteAllText((Join-Path $installerFolder 'SecretManager-Setup.sha256'), "$hash  SecretManager-Setup.exe`n# SecretManager-Version: $installerVersion`n# SecretManager-Size: $installerSize`n")
     Get-Item -LiteralPath $installer | Select-Object FullName, Length
 }
 finally { Pop-Location }

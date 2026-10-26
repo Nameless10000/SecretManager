@@ -76,6 +76,8 @@ internal sealed class DiagnosticJournal(string dataDirectory, int maximumBytes =
         return new
         {
             Type = error.GetType().FullName, HResult = $"0x{error.HResult:X8}",
+            HttpStatus = error is System.Net.Http.HttpRequestException http ? (int?)http.StatusCode : null,
+            HttpError = error is System.Net.Http.HttpRequestException network ? network.HttpRequestError.ToString() : null,
             Frames = (new StackTrace(error, false).GetFrames() ?? []).Take(24).Select(f =>
             {
                 var method = f.GetMethod(); return method?.DeclaringType?.FullName + "." + method?.Name;

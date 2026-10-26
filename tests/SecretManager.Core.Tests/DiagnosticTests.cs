@@ -19,6 +19,17 @@ public sealed class DiagnosticTests : IDisposable
         Assert.DoesNotContain("private", text); Assert.DoesNotContain("attachment", text);
     }
     [Fact]
+    public void HttpStatusIsRecordedWithoutUrlsHeadersOrResponseText()
+    {
+        var journal = new DiagnosticJournal(folder);
+        var error = new HttpRequestException("private URL and response", null, System.Net.HttpStatusCode.Forbidden);
+        error.Data["Authorization"] = "private token";
+        journal.Record(AppEvent.ActionRejected, error, "CheckUpdates");
+        var text = File.ReadAllText(journal.LogPath);
+        Assert.Contains("\"HttpStatus\":403", text); Assert.Contains("HttpError", text);
+        Assert.DoesNotContain("private", text); Assert.DoesNotContain("Authorization", text);
+    }
+    [Fact]
     public void InterruptedRunIsReportedAndCleanShutdownRemovesTheMarker()
     {
         var first = new DiagnosticJournal(folder); first.Start();

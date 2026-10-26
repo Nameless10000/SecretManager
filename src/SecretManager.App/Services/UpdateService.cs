@@ -1,8 +1,8 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Security.Cryptography;
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 
@@ -10,55 +10,73 @@ namespace SecretManager.App.Services;
 
 internal sealed record UpdateRelease(Version Version, Uri Download, long Size, string Sha256);
 internal sealed record PreparedUpdate(UpdateRelease Release, string Installer);
+internal enum UpdateCheckStatus { UpToDate, Available, LegacyRelease, NotPublished }
+internal sealed record UpdateCheckResult(UpdateCheckStatus Status, UpdateRelease? Release = null);
 
 internal sealed class UpdateService(HttpClient client)
 {
     internal const string Repository = "Nameless10000/SecretManager";
     internal const int MaximumInstallerBytes = 256 * 1024 * 1024;
-    internal static readonly Uri ReleaseUri = new($"https://api.github.com/repos/{Repository}/releases/latest");
+    internal static readonly Uri ManifestUri = new($"https://github.com/{Repository}/releases/download/latest/SecretManager-Setup.sha256");
+    internal static readonly Uri InstallerUri = new($"https://github.com/{Repository}/releases/download/latest/SecretManager-Setup.exe");
 
     internal static HttpClient CreateClient()
     {
         var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("SecretManager/" + CurrentVersion);
-        http.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
         return http;
     }
     internal static Version CurrentVersion => typeof(UpdateService).Assembly.GetName().Version ?? new(0, 0, 0);
     internal static Version Normalize(Version version) => new(version.Major, version.Minor, Math.Max(0, version.Build));
 
-    internal async Task<UpdateRelease?> CheckAsync(Version current, CancellationToken cancellationToken)
+    internal async Task<UpdateCheckResult> CheckAsync(Version current, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, ReleaseUri);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, ManifestUri);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NotFound) return new(UpdateCheckStatus.NotPublished);
         response.EnsureSuccessStatusCode();
+        ValidateDownloadResponse(response);
         using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        var bytes = await ReadBoundedAsync(stream, 1024 * 1024, cancellationToken);
-        return ParseRelease(System.Text.Encoding.UTF8.GetString(bytes), current);
+        var bytes = await ReadBoundedAsync(stream, 4096, cancellationToken);
+        return ParseManifest(System.Text.Encoding.UTF8.GetString(bytes), current);
     }
 
-    internal static UpdateRelease? ParseRelease(string json, Version current)
+    internal static UpdateCheckResult ParseManifest(string manifest, Version current)
     {
-        using var document = JsonDocument.Parse(json); var root = document.RootElement;
-        if (root.GetProperty("draft").GetBoolean() || root.GetProperty("prerelease").GetBoolean()) return null;
-        var name = root.GetProperty("name").GetString() ?? "";
-        var match = Regex.Match(name, @"^SecretManager v?(\d+\.\d+\.\d+)$", RegexOptions.CultureInvariant);
-        // Older rolling releases did not advertise a version. Never infer it from a date or tag.
-        if (!match.Success || !Version.TryParse(match.Groups[1].Value, out var version)) return null;
-        if (Normalize(version) <= Normalize(current)) return null;
-        var assets = root.GetProperty("assets").EnumerateArray().Where(a => a.GetProperty("name").GetString() == "SecretManager-Setup.exe").ToArray();
-        if (assets.Length != 1) throw new InvalidDataException("Релиз не содержит единственный установщик.");
-        var asset = assets[0]; var size = asset.GetProperty("size").GetInt64();
-        var digest = asset.GetProperty("digest").GetString() ?? "";
-        if (size is <= 0 or > MaximumInstallerBytes || !Regex.IsMatch(digest, "^sha256:[0-9a-fA-F]{64}$"))
-            throw new InvalidDataException("Некорректный размер или SHA-256 установщика.");
-        if (!Uri.TryCreate(asset.GetProperty("browser_download_url").GetString(), UriKind.Absolute, out var uri) ||
-            uri.Scheme != "https" || uri.Host != "github.com" || uri.Port != 443 || uri.UserInfo.Length != 0 ||
-            uri.Query.Length != 0 || uri.Fragment.Length != 0 ||
-            uri.AbsolutePath != $"/{Repository}/releases/download/latest/SecretManager-Setup.exe")
-            throw new InvalidDataException("Недопустимый адрес установщика.");
-        return new(version, uri, size, digest[7..].ToLowerInvariant());
+        var lines = manifest.TrimStart('\uFEFF').Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length == 0 || !Regex.IsMatch(lines[0], @"\A[0-9a-fA-F]{64}  SecretManager-Setup\.exe\z"))
+            throw new InvalidDataException("Некорректный SHA-256 установщика.");
+        // The old checksum file is valid, but cannot tell us a release version.
+        // Do not fall back to the rate-limited API or claim that this means up to date.
+        if (lines.Length == 1) return new(UpdateCheckStatus.LegacyRelease);
+        if (lines.Length != 3) throw new InvalidDataException("Некорректные метаданные обновления.");
+        var match = Regex.Match(lines[1], @"\A# SecretManager-Version: (\d+\.\d+\.\d+)\z", RegexOptions.CultureInvariant);
+        if (!match.Success || !Version.TryParse(match.Groups[1].Value, out var version))
+            throw new InvalidDataException("Некорректная версия обновления.");
+        var sizeMatch = Regex.Match(lines[2], @"\A# SecretManager-Size: (\d+)\z", RegexOptions.CultureInvariant);
+        if (!sizeMatch.Success || !long.TryParse(sizeMatch.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var size) ||
+            size is <= 0 or > MaximumInstallerBytes)
+            throw new InvalidDataException("Некорректный размер установщика.");
+        return Normalize(version) <= Normalize(current) ? new(UpdateCheckStatus.UpToDate) :
+            new(UpdateCheckStatus.Available, new(version, InstallerUri, size, lines[0][..64].ToLowerInvariant()));
+    }
+
+    internal static string DescribeHttpFailure(HttpRequestException error) => error.StatusCode switch
+    {
+        HttpStatusCode.Forbidden => "GitHub отклонил запрос (HTTP 403). Возможны ограничения доступа или временный лимит. Повторите позже.",
+        HttpStatusCode.TooManyRequests => "GitHub временно ограничил запросы (HTTP 429). Повторите позже.",
+        HttpStatusCode.NotFound => "Файл обновления не найден в релизе (HTTP 404). Повторите проверку позже.",
+        { } status when (int)status >= 500 => $"GitHub временно недоступен (HTTP {(int)status}). Повторите позже.",
+        { } status => $"Не удалось загрузить обновление (HTTP {(int)status}). Проверьте доступ к GitHub.",
+        null => "Не удалось подключиться к GitHub. Проверьте сеть и повторите позже."
+    };
+
+    private static void ValidateDownloadResponse(HttpResponseMessage response)
+    {
+        var final = response.RequestMessage?.RequestUri;
+        if (final is null || final.Scheme != "https" || final.UserInfo.Length != 0 || final.Port != 443 ||
+            !new[] { "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com" }.Contains(final.Host))
+            throw new InvalidDataException("Недопустимое перенаправление загрузки.");
     }
 
     internal async Task<PreparedUpdate> DownloadAsync(UpdateRelease release, string folder, CancellationToken cancellationToken)
@@ -78,10 +96,7 @@ internal sealed class UpdateService(HttpClient client)
         {
             using var response = await client.GetAsync(release.Download, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
-            var final = response.RequestMessage?.RequestUri;
-            if (final is null || final.Scheme != "https" || final.UserInfo.Length != 0 || final.Port != 443 ||
-                !new[] { "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com" }.Contains(final.Host))
-                throw new InvalidDataException("Недопустимое перенаправление загрузки.");
+            ValidateDownloadResponse(response);
             if (response.Content.Headers.ContentLength is long length && length != release.Size)
                 throw new InvalidDataException("Размер установщика не совпал с релизом.");
             using var input = await response.Content.ReadAsStreamAsync(cancellationToken);

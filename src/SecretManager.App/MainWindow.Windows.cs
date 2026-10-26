@@ -47,9 +47,18 @@ public sealed partial class MainWindow
         {
             if (interactive) ShowUpdateMessage("Проверка обновлений…");
             updateClient ??= UpdateService.CreateClient(); var updater = new UpdateService(updateClient);
-            var release = await updater.CheckAsync(UpdateService.CurrentVersion, updateCancellation.Token);
+            var check = await updater.CheckAsync(UpdateService.CurrentVersion, updateCancellation.Token);
             if (exiting) return;
-            if (release is null) { if (interactive) ShowUpdateMessage("Новая версия не найдена."); return; }
+            if (check.Release is not { } release)
+            {
+                if (interactive) ShowUpdateMessage(check.Status switch
+                {
+                    UpdateCheckStatus.NotPublished => "Файл обновления ещё не опубликован в GitHub Releases.",
+                    UpdateCheckStatus.LegacyRelease => "Опубликованный релиз пока не содержит данных о версии для автообновления. Проверьте страницу релизов GitHub или повторите после публикации новой сборки.",
+                    _ => "Установлена актуальная версия."
+                });
+                return;
+            }
             if (!IsInstalledApplication())
             {
                 ShowUpdateMessage($"Доступна версия {release.Version}. Автоустановка доступна для установленной программы; установщик — в релизах GitHub."); return;
@@ -67,7 +76,8 @@ public sealed partial class MainWindow
             InvalidOperationException or System.Security.Cryptography.CryptographicException or ArgumentException or KeyNotFoundException or FormatException or System.ComponentModel.Win32Exception)
         {
             AppDiagnostics.Journal.Record(AppEvent.ActionRejected, ex, "CheckUpdates");
-            if (interactive && !exiting) ShowUpdateMessage("Не удалось проверить или загрузить обновление. Повторите позже; приложение продолжает работать.", true);
+            if (interactive && !exiting) ShowUpdateMessage(ex is HttpRequestException http ? UpdateService.DescribeHttpFailure(http) :
+                "Не удалось проверить или загрузить обновление. Повторите позже; приложение продолжает работать.", true);
             else if (!exiting) UpdateNotice.IsOpen = false;
         }
         finally { checkingUpdate = false; }

@@ -10,37 +10,37 @@ namespace SecretManager.Core.Tests;
 public sealed class UpdateTests : IDisposable
 {
     private readonly string folder = Path.Combine(Path.GetTempPath(), "SecretManager.UpdateTests", Guid.NewGuid().ToString("N"));
-    private static string Release(string version = "0.1.5", string? url = null, string? digest = null, long size = 5,
-        bool draft = false, bool prerelease = false) => JsonSerializer.Serialize(new
-    {
-        name = "SecretManager " + version, draft, prerelease,
-        assets = new[] { new { name = "SecretManager-Setup.exe", size, digest = digest ?? "sha256:" + new string('a', 64),
-            browser_download_url = url ?? "https://github.com/Nameless10000/SecretManager/releases/download/latest/SecretManager-Setup.exe" } }
-    });
+    private static string Manifest(string version = "0.1.5", string? digest = null, long size = 5) =>
+        $"{digest ?? new string('a', 64)}  SecretManager-Setup.exe\n# SecretManager-Version: {version}\n# SecretManager-Size: {size}\n";
 
     [Theory]
     [InlineData("0.1.4", false)]
     [InlineData("0.1.5", false)]
     [InlineData("0.1.6", true)]
     [InlineData("0.10.0", true)]
-    [InlineData("— latest", false)]
     public void VersionsAreComparedNumericallyAndNeverDowngraded(string version, bool available) =>
-        Assert.Equal(available, UpdateService.ParseRelease(Release(version), new(0, 1, 5, 0)) is not null);
+        Assert.Equal(available, UpdateService.ParseManifest(Manifest(version), new(0, 1, 5, 0)).Status == UpdateCheckStatus.Available);
 
     [Fact]
-    public void DraftAndPrereleaseAreIgnored()
+    public void PartialOrMalformedMetadataCannotOfferAnUpdate()
     {
-        Assert.Null(UpdateService.ParseRelease(Release(draft: true), new(0, 1, 4)));
-        Assert.Null(UpdateService.ParseRelease(Release(prerelease: true), new(0, 1, 4)));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ParseManifest(Manifest("0.1.5-preview"), new(0, 1, 4)));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ParseManifest(Manifest() + "extra line", new(0, 1, 4)));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ParseManifest(Manifest().Replace("# SecretManager-Size: 5\n", ""), new(0, 1, 4)));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ParseManifest("", new(0, 1, 4)));
     }
 
     [Theory]
     [InlineData("http://github.com/Nameless10000/SecretManager/releases/download/latest/SecretManager-Setup.exe")]
     [InlineData("https://evil.example/SecretManager-Setup.exe")]
-    [InlineData("https://github.com/Other/SecretManager/releases/download/latest/SecretManager-Setup.exe")]
-    [InlineData("https://github.com/Nameless10000/SecretManager/releases/download/latest/SecretManager-Setup.exe?anything=1")]
-    public void OnlyTheExactHttpsRepositoryInstallerIsAccepted(string url) =>
-        Assert.Throws<InvalidDataException>(() => UpdateService.ParseRelease(Release(url: url), new(0, 1, 4)));
+    [InlineData("https://github.com:8443/anything")]
+    [InlineData("https://any@github.com/anything")]
+    public async Task UnsafeManifestRedirectsAreRejected(string url)
+    {
+        using var http = new HttpClient(new Handler(_ => new(HttpStatusCode.OK)
+        { RequestMessage = new(HttpMethod.Get, url), Content = new StringContent(Manifest()) }));
+        await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateService(http).CheckAsync(new(0, 1, 4), default));
+    }
 
     [Theory]
     [InlineData("sha1:abcdef", 5)]
@@ -48,13 +48,13 @@ public sealed class UpdateTests : IDisposable
     [InlineData(null, 0)]
     [InlineData(null, 268435457)]
     public void DigestAndSizeAreMandatory(string? digest, long size) =>
-        Assert.Throws<InvalidDataException>(() => UpdateService.ParseRelease(Release(digest: digest, size: size), new(0, 1, 4)));
+        Assert.Throws<InvalidDataException>(() => UpdateService.ParseManifest(Manifest(digest: digest, size: size), new(0, 1, 4)));
 
     [Fact]
     public async Task DownloadIsBoundedAndDigestMismatchRemovesTheCandidate()
     {
         byte[] bytes = [1, 2, 3, 4, 5];
-        var release = UpdateService.ParseRelease(Release(), new(0, 1, 4))!;
+        var release = UpdateService.ParseManifest(Manifest(), new(0, 1, 4)).Release!;
         using var http = Client(bytes);
         await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateService(http).DownloadAsync(release, folder, default));
         Assert.Empty(Directory.GetFiles(folder, "*.exe", SearchOption.AllDirectories));
@@ -69,7 +69,7 @@ public sealed class UpdateTests : IDisposable
     public async Task VerifiedDownloadAndCancellationLeaveNoPartialInstaller()
     {
         byte[] bytes = [1, 2, 3, 4, 5];
-        var release = UpdateService.ParseRelease(Release(digest: "sha256:" + Convert.ToHexString(SHA256.HashData(bytes))), new(0, 1, 4))!;
+        var release = UpdateService.ParseManifest(Manifest(digest: Convert.ToHexString(SHA256.HashData(bytes))), new(0, 1, 4)).Release!;
         using var http = Client(bytes);
         var candidate = await new UpdateService(http).DownloadAsync(release, folder, default);
         Assert.Equal(bytes, await File.ReadAllBytesAsync(candidate.Installer));
@@ -85,10 +85,62 @@ public sealed class UpdateTests : IDisposable
     public async Task FailedHttpResponseAndOversizedMetadataCannotCreateAnInstaller()
     {
         using var unavailable = new HttpClient(new Handler(_ => new(HttpStatusCode.ServiceUnavailable)));
-        await Assert.ThrowsAsync<HttpRequestException>(() => new UpdateService(unavailable).CheckAsync(new(0, 1, 4), default));
-        using var oversized = Client(new byte[1024 * 1024 + 1], false);
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => new UpdateService(unavailable).CheckAsync(new(0, 1, 4), default));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, error.StatusCode);
+        using var oversized = Client(new byte[4097], false);
         await Assert.ThrowsAsync<InvalidDataException>(() => new UpdateService(oversized).CheckAsync(new(0, 1, 4), default));
         Assert.False(Directory.Exists(folder));
+    }
+
+    [Fact]
+    public async Task ChecksUseDirectReleaseFilesWithoutAnyApiRequest()
+    {
+        var requests = new List<Uri>();
+        using var http = new HttpClient(new Handler(request =>
+        {
+            requests.Add(request.RequestUri!);
+            Assert.Equal(UpdateService.ManifestUri, request.RequestUri);
+            return new(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent(Manifest()) };
+        }));
+        var result = await new UpdateService(http).CheckAsync(new(0, 1, 4), default);
+        Assert.Equal(UpdateCheckStatus.Available, result.Status);
+        Assert.Equal(UpdateService.InstallerUri, result.Release!.Download);
+        Assert.Single(requests);
+        Assert.Null(http.DefaultRequestHeaders.Authorization);
+    }
+
+    [Fact]
+    public async Task LegacyReleaseDoesNotMasqueradeAsUpToDateOrFallBackToTheApi()
+    {
+        var requests = 0;
+        using var http = new HttpClient(new Handler(request =>
+        {
+            requests++; Assert.Equal(UpdateService.ManifestUri, request.RequestUri);
+            return new(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent(new string('a', 64) + "  SecretManager-Setup.exe\n") };
+        }));
+        var result = await new UpdateService(http).CheckAsync(new(0, 1, 4), default);
+        Assert.Equal(UpdateCheckStatus.LegacyRelease, result.Status); Assert.Null(result.Release); Assert.Equal(1, requests);
+    }
+
+    [Fact]
+    public async Task UnpublishedReleaseIsReportedWithoutAnException()
+    {
+        using var http = new HttpClient(new Handler(_ => new(HttpStatusCode.NotFound)));
+        var result = await new UpdateService(http).CheckAsync(new(0, 1, 4), default);
+        Assert.Equal(UpdateCheckStatus.NotPublished, result.Status); Assert.Null(result.Release);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Forbidden)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task HttpFailuresKeepTheStatusButNeverShowTheResponseOrExceptionMessage(HttpStatusCode status)
+    {
+        using var http = new HttpClient(new Handler(_ => new(status) { Content = new StringContent("private response") }));
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => new UpdateService(http).CheckAsync(new(0, 1, 4), default));
+        Assert.Equal(status, error.StatusCode);
+        var message = UpdateService.DescribeHttpFailure(new("private message", null, status));
+        Assert.Contains(((int)status).ToString(), message); Assert.DoesNotContain("private", message);
     }
 
     [Fact]

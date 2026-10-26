@@ -1,4 +1,7 @@
 using Microsoft.UI.Xaml.Media;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
 using SecretManager.App.Services;
 using SecretManager.Core.Models;
 using SecretManager.Core.Services;
@@ -133,6 +136,29 @@ public sealed partial class MainWindow
         ShowWindow(); await Login(password, true);
         Pass("startup in tray remains locked and can be reopened");
 
+        var previousUpdateClient = updateClient;
+        try
+        {
+            foreach (var status in new[] { HttpStatusCode.Forbidden, HttpStatusCode.TooManyRequests, HttpStatusCode.ServiceUnavailable })
+            {
+                updateClient = new HttpClient(new UpdateResponseHandler(status));
+                await CheckUpdatesAsync(true);
+                Check(UpdateNotice.IsOpen && UpdateNotice.Severity == InfoBarSeverity.Warning &&
+                    UpdateNotice.Message.Contains(((int)status).ToString()), "Update error lost its HTTP status in the UI.");
+                Check(ViewModel.IsUnlocked && !checkingUpdate, "Update rejection damaged the current session.");
+                updateClient.Dispose();
+            }
+            updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.NotFound));
+            await CheckUpdatesAsync(true);
+            Check(UpdateNotice.Severity == InfoBarSeverity.Informational && UpdateNotice.Message.Contains("ещё не опубликован"), "Missing release became a generic update error.");
+            updateClient.Dispose();
+            updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.OK));
+            await CheckUpdatesAsync(true);
+            Check(UpdateNotice.Severity == InfoBarSeverity.Informational && UpdateNotice.Message.Contains("не содержит данных"), "Legacy checksum was reported as up to date.");
+        }
+        finally { updateClient?.Dispose(); updateClient = previousUpdateClient; UpdateNotice.IsOpen = false; }
+        Pass("update HTTP failures, missing and legacy metadata through real notice");
+
         stage("lock while editing a field");
         var edit = Run(() => EditField(first.Id, null));
         await Wait(() => activeDialog?.IsLoaded == true, "field editor");
@@ -213,6 +239,12 @@ public sealed partial class MainWindow
     private void CheckLocked() => Check(!ViewModel.IsUnlocked && ViewModel.Associations.Count == 0 && LoginView.Visibility == Visibility.Visible &&
         VaultView.Visibility == Visibility.Collapsed && SettingsPanel.Visibility == Visibility.Collapsed, "Lock did not clear and hide the vault UI.");
     private static void Check(bool condition, string error) { if (!condition) throw new InvalidOperationException(error); }
+    private sealed class UpdateResponseHandler(HttpStatusCode status) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(status) { RequestMessage = request,
+                Content = new StringContent(new string('a', 64) + "  SecretManager-Setup.exe\n") });
+    }
     private static async Task SaveUsageSnapshot(FrameworkElement element, string path)
     {
         await Task.Delay(400); // Let native expansion and text rendering reach their final frame.
