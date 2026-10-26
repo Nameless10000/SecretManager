@@ -8,6 +8,7 @@ public sealed partial class MainWindow
 {
     private readonly StartupRegistration startupRegistration = new(Environment.ProcessPath ?? "");
     private readonly CancellationTokenSource updateCancellation = new();
+    private readonly DispatcherTimer updateNoticeTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private HttpClient? updateClient;
     private PreparedUpdate? preparedUpdate;
     private bool checkingUpdate;
@@ -56,18 +57,18 @@ public sealed partial class MainWindow
                     UpdateCheckStatus.NotPublished => "Файл обновления ещё не опубликован в GitHub Releases.",
                     UpdateCheckStatus.LegacyRelease => "Опубликованный релиз пока не содержит данных о версии для автообновления. Проверьте страницу релизов GitHub или повторите после публикации новой сборки.",
                     _ => "Установлена актуальная версия."
-                });
+                }, check.Status == UpdateCheckStatus.UpToDate ? InfoBarSeverity.Success : InfoBarSeverity.Error);
                 return;
             }
             if (!IsInstalledApplication())
             {
-                ShowUpdateMessage($"Доступна версия {release.Version}. Автоустановка доступна для установленной программы; установщик — в релизах GitHub."); return;
+                ShowUpdateMessage($"Доступна версия {release.Version}. Автоустановка доступна для установленной программы; установщик — в релизах GitHub.", InfoBarSeverity.Warning); return;
             }
-            ShowUpdateMessage($"Загрузка версии {release.Version}… Приложением можно пользоваться.");
+            ShowUpdateMessage($"Загрузка версии {release.Version}… Приложением можно пользоваться.", InfoBarSeverity.Warning);
             var downloaded = await updater.DownloadAsync(release, AppPaths.DataDirectory, updateCancellation.Token);
             if (exiting) return;
             UpdateService.ValidateInstaller(downloaded); preparedUpdate = downloaded;
-            ShowUpdateMessage($"Версия {release.Version} готова. После блокировки приложение установит её и перезапустится.");
+            ShowUpdateMessage($"Версия {release.Version} готова. После блокировки приложение установит её и перезапустится.", InfoBarSeverity.Warning);
             InstallUpdateButton.Visibility = Visibility.Visible;
             TryApplyAutomaticUpdate();
         }
@@ -77,16 +78,24 @@ public sealed partial class MainWindow
         {
             AppDiagnostics.Journal.Record(AppEvent.ActionRejected, ex, "CheckUpdates");
             if (interactive && !exiting) ShowUpdateMessage(ex is HttpRequestException http ? UpdateService.DescribeHttpFailure(http) :
-                "Не удалось проверить или загрузить обновление. Повторите позже; приложение продолжает работать.", true);
+                "Не удалось проверить или загрузить обновление. Повторите позже; приложение продолжает работать.", InfoBarSeverity.Error);
             else if (!exiting) UpdateNotice.IsOpen = false;
         }
         finally { checkingUpdate = false; }
     }
-    private void ShowUpdateMessage(string message, bool error = false)
+    private void ShowUpdateMessage(string message, InfoBarSeverity severity = InfoBarSeverity.Informational)
     {
         if (exiting) return;
+        updateNoticeTimer.Stop();
         UpdateNotice.Message = message;
-        UpdateNotice.Severity = error ? InfoBarSeverity.Warning : InfoBarSeverity.Informational; UpdateNotice.IsOpen = true;
+        UpdateNotice.Severity = severity; UpdateNotice.IsOpen = true;
+        if (severity is InfoBarSeverity.Success or InfoBarSeverity.Error) updateNoticeTimer.Start();
+    }
+    private void DismissUpdateNotice(object? sender, object args)
+    {
+        updateNoticeTimer.Stop();
+        if (exiting) return;
+        UpdateNotice.IsOpen = false; UpdateNotice.Message = "";
     }
     private void TryApplyAutomaticUpdate()
     {
@@ -115,7 +124,7 @@ public sealed partial class MainWindow
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.ComponentModel.Win32Exception)
         {
             automaticUpdates = false; AppDiagnostics.Journal.Record(AppEvent.ActionRejected, ex, "InstallUpdate");
-            ShowUpdateMessage("Не удалось запустить установку. Можно повторить кнопкой или установить обновление вручную из GitHub Releases.", true);
+            ShowUpdateMessage("Не удалось запустить установку. Можно повторить кнопкой или установить обновление вручную из GitHub Releases.", InfoBarSeverity.Error);
         }
     }
 }

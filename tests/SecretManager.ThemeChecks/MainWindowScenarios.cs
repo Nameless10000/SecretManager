@@ -143,21 +143,49 @@ public sealed partial class MainWindow
             {
                 updateClient = new HttpClient(new UpdateResponseHandler(status));
                 await CheckUpdatesAsync(true);
-                Check(UpdateNotice.IsOpen && UpdateNotice.Severity == InfoBarSeverity.Warning &&
+                Check(UpdateNotice.IsOpen && UpdateNotice.Severity == InfoBarSeverity.Error &&
                     UpdateNotice.Message.Contains(((int)status).ToString()), "Update error lost its HTTP status in the UI.");
                 Check(ViewModel.IsUnlocked && !checkingUpdate, "Update rejection damaged the current session.");
                 updateClient.Dispose();
             }
             updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.NotFound));
             await CheckUpdatesAsync(true);
-            Check(UpdateNotice.Severity == InfoBarSeverity.Informational && UpdateNotice.Message.Contains("ещё не опубликован"), "Missing release became a generic update error.");
+            Check(UpdateNotice.Severity == InfoBarSeverity.Error && UpdateNotice.Message.Contains("ещё не опубликован"), "Missing release lost its error state.");
             updateClient.Dispose();
             updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.OK));
             await CheckUpdatesAsync(true);
-            Check(UpdateNotice.Severity == InfoBarSeverity.Informational && UpdateNotice.Message.Contains("не содержит данных"), "Legacy checksum was reported as up to date.");
+            Check(UpdateNotice.Severity == InfoBarSeverity.Error && UpdateNotice.Message.Contains("не содержит данных"), "Legacy checksum was reported as up to date.");
+            Pass("update HTTP failures, missing and legacy metadata through real notice");
+            updateClient.Dispose();
+
+            var currentVersion = UpdateService.Normalize(UpdateService.CurrentVersion);
+            static string Manifest(Version version) => new string('a', 64) + "  SecretManager-Setup.exe\n# SecretManager-Version: " + version + "\n# SecretManager-Size: 5\n";
+            updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.OK, Manifest(currentVersion)));
+            var elapsed = System.Diagnostics.Stopwatch.StartNew();
+            await CheckUpdatesAsync(true); await CheckUpdateIcon(InfoBarSeverity.Success);
+            await SaveUsageSnapshot(Root, Path.Combine(output, "update-current.png"));
+            await Wait(() => !UpdateNotice.IsOpen, "successful update notice dismissal");
+            Check(elapsed.Elapsed >= TimeSpan.FromSeconds(4.5) && UpdateNotice.Message.Length == 0, "Success notice disappeared before five seconds or retained its text.");
+            updateClient.Dispose();
+
+            updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.ServiceUnavailable));
+            await CheckUpdatesAsync(true); await CheckUpdateIcon(InfoBarSeverity.Error);
+            await SaveUsageSnapshot(Root, Path.Combine(output, "update-error.png"));
+            updateClient.Dispose();
+            updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.OK, Manifest(new(currentVersion.Major + 1, 0, 0))));
+            await CheckUpdatesAsync(true); await CheckUpdateIcon(InfoBarSeverity.Warning);
+            await SaveUsageSnapshot(Root, Path.Combine(output, "update-available.png"));
+            await Task.Delay(5200);
+            Check(UpdateNotice.IsOpen && UpdateNotice.Severity == InfoBarSeverity.Warning, "An earlier error timer hid the available update.");
+            updateClient.Dispose();
+
+            updateClient = new HttpClient(new UpdateResponseHandler(HttpStatusCode.Forbidden)); elapsed.Restart();
+            await CheckUpdatesAsync(true);
+            await Wait(() => !UpdateNotice.IsOpen, "failed update notice dismissal");
+            Check(elapsed.Elapsed >= TimeSpan.FromSeconds(4.5) && UpdateNotice.Message.Length == 0, "Error notice disappeared before five seconds or retained its text.");
+            Pass("green current, yellow available, red error and five second dismissal");
         }
         finally { updateClient?.Dispose(); updateClient = previousUpdateClient; UpdateNotice.IsOpen = false; }
-        Pass("update HTTP failures, missing and legacy metadata through real notice");
 
         stage("lock while editing a field");
         var edit = Run(() => EditField(first.Id, null));
@@ -239,11 +267,25 @@ public sealed partial class MainWindow
     private void CheckLocked() => Check(!ViewModel.IsUnlocked && ViewModel.Associations.Count == 0 && LoginView.Visibility == Visibility.Visible &&
         VaultView.Visibility == Visibility.Collapsed && SettingsPanel.Visibility == Visibility.Collapsed, "Lock did not clear and hide the vault UI.");
     private static void Check(bool condition, string error) { if (!condition) throw new InvalidOperationException(error); }
-    private sealed class UpdateResponseHandler(HttpStatusCode status) : HttpMessageHandler
+    private async Task CheckUpdateIcon(InfoBarSeverity severity)
+    {
+        Root.UpdateLayout(); await Task.Delay(100);
+        Check(UpdateNotice.Severity == severity, "Wrong update notice severity.");
+        var icon = Elements(UpdateNotice).OfType<TextBlock>().Single(t => t.Name == "IconBackground");
+        var color = ((SolidColorBrush)icon.Foreground).Color;
+        Check(severity switch
+        {
+            InfoBarSeverity.Success => color.G > color.R && color.G > color.B,
+            InfoBarSeverity.Warning => color.R > color.B && color.G > color.B,
+            InfoBarSeverity.Error => color.R > color.G && color.R > color.B,
+            _ => false
+        }, $"Wrong native update icon color for {severity}: {color}.");
+    }
+    private sealed class UpdateResponseHandler(HttpStatusCode status, string? manifest = null) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(status) { RequestMessage = request,
-                Content = new StringContent(new string('a', 64) + "  SecretManager-Setup.exe\n") });
+                Content = new StringContent(manifest ?? new string('a', 64) + "  SecretManager-Setup.exe\n") });
     }
     private static async Task SaveUsageSnapshot(FrameworkElement element, string path)
     {

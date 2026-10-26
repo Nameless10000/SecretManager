@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
         var dataFolder = AppPaths.DataDirectory;
         ViewModel = new MainViewModel(Path.Combine(dataFolder, "vault.db"));
         InitializeComponent();
+        updateNoticeTimer.Tick += DismissUpdateNotice;
         hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
         ExtendsContentIntoTitleBar = true; SetTitleBar(TitleBar);
         SystemBackdrop = new MicaBackdrop();
@@ -585,6 +586,7 @@ public sealed partial class MainWindow : Window
     {
         exiting = true;
         updateCancellation.Cancel(); updateClient?.Dispose();
+        updateNoticeTimer.Stop(); updateNoticeTimer.Tick -= DismissUpdateNotice;
         timer.Stop(); SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
         ViewModel.SessionChanged -= UpdateSession; ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         activeDialog?.Hide(); ViewModel.Lock(); ViewModel.Dispose();
