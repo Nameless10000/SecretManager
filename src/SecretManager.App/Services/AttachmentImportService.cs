@@ -9,6 +9,18 @@ namespace SecretManager.App.Services;
 
 public sealed class AttachmentImportService
 {
+    public async Task<AttachmentContent> FromPathAsync(string path, bool imagesOnly)
+    {
+        using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var bytes = await AttachmentContent.ReadBoundedAsync(input);
+        try
+        {
+            var content = AttachmentContent.FromBytes(Path.GetFileName(path), bytes, imagesOnly);
+            if (imagesOnly) await ValidateImageBytesAsync(bytes);
+            return content;
+        }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+    }
     public async Task<AttachmentContent> FromFileAsync(StorageFile file, bool imagesOnly)
     {
         using var input = await file.OpenStreamForReadAsync();

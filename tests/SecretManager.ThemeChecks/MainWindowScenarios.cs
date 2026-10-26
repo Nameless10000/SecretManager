@@ -41,6 +41,29 @@ public sealed partial class MainWindow
             Value = Convert.ToBase64String(await File.ReadAllBytesAsync(Path.Combine(output, "attachment-fixtures", "sample.png"))) });
         Root.UpdateLayout(); Pass("association and all four field kinds");
 
+        stage("select individual transfer fields");
+        var transfer = AskSelection(ViewModel.TransferDocument, "Synthetic selection check");
+        await Wait(() => activeDialog?.IsLoaded == true, "transfer selector load");
+        var selection = (SecretManager.App.Controls.TransferSelection)activeDialog!.Content;
+        Check(selection.Capture().Count == 3 && selection.Capture().Values.Sum(f => f.Count) == 4, "Default selection omitted fields.");
+        selection.ClearSelection();
+        await Wait(() => !activeDialog.IsPrimaryButtonEnabled, "empty selection validation");
+        Check(!activeDialog.IsPrimaryButtonEnabled, "Empty transfer was allowed.");
+        var selectedTopic = selection.Tree.RootNodes.Single(n => n.Children.Count > 0);
+        selectedTopic.IsExpanded = true;
+        selection.Tree.SelectedNodes.Add(selectedTopic.Children[0]); selection.UpdateSummary(); Root.UpdateLayout();
+        await Wait(() => activeDialog.IsPrimaryButtonEnabled, "selected field validation");
+        Check(selection.Capture().Count == 1 && selection.Capture().Values.Single().Count == 1, "Individual field selection failed.");
+        Check(activeDialog.IsPrimaryButtonEnabled, "Selected field could not be transferred.");
+        await SaveUsageSnapshot(activeDialog, Path.Combine(output, "transfer-selection.png"));
+        activeDialog.Hide(); Check(await transfer is null, "Cancelled selection was accepted.");
+        Pass("transfer defaults, empty guard, individual field and cancel");
+
+        var lockTransfer = Run(async () => { await AskSelection(ViewModel.TransferDocument, "Synthetic lock selection check"); });
+        await Wait(() => activeDialog?.IsLoaded == true, "selector before lock");
+        ViewModel.Lock(); await lockTransfer; CheckLocked(); await Login(password, true);
+        Pass("lock cancels transfer selection");
+
         SearchBox.Text = "ПОЧТА Mail";
         await Wait(() => ViewModel.Query == "ПОЧТА Mail" && ViewModel.Associations.Count == 2, "search binding");
         Check(ViewModel.TotalCount == 3, "Search changed the total count."); Pass("OR search through actual search control");
@@ -67,6 +90,48 @@ public sealed partial class MainWindow
                 "Reopened settings disagree with saved values.");
             Settings_Click(this, new RoutedEventArgs()); Pass("settings save and reopen " + theme);
         }
+
+        foreach (var size in new[] { 10d, 26d })
+        {
+            Settings_Click(this, new RoutedEventArgs()); FontChoice.SelectedItem = "Comic Sans MS"; FontSizeChoice.Value = size;
+            Root.UpdateLayout(); Check(appearancePreview?.FontSize == size, "Font slider did not preview the boundary.");
+            var settingsHeading = Elements(SettingsPanel).OfType<TextBlock>().First(t => t.Text == "Настройки");
+            Check(Math.Abs(settingsHeading.FontSize - 23 * size / 14) < .01, $"Settings heading font size drift: {settingsHeading.FontSize} at {size}.");
+            await SaveUsageSnapshot(Root, Path.Combine(output, $"font-{size:0}.png"));
+            SaveSettings_Click(this, new RoutedEventArgs()); await Wait(() => !actionBusy, "font settings save");
+            Settings_Click(this, new RoutedEventArgs()); Settings_Click(this, new RoutedEventArgs());
+            Check(FontSizeChoice.Value == size && FontChoice.SelectedItem as string == "Comic Sans MS", "Font settings failed to reopen.");
+            Settings_Click(this, new RoutedEventArgs());
+        }
+        ViewModel.SaveSettings(ViewModel.Settings with { FontSize = 14, FontFamily = "Segoe UI Variable" }); ApplyAppearance();
+        Pass("Comic Sans and 10–26 slider save and reopen");
+
+        Navigation.IsPaneOpen = true; Root.UpdateLayout(); await Task.Delay(350);
+        var pane = (Grid)Navigation.Pane;
+        var buttons = pane.Children.OfType<StackPanel>().SelectMany(p => p.Children.OfType<Button>()).ToArray();
+        Check(buttons.All(b => b.HorizontalContentAlignment == HorizontalAlignment.Left), "Sidebar buttons are not aligned left.");
+        var top = QuickNavigation.TransformToVisual(pane).TransformPoint(new Windows.Foundation.Point()).Y;
+        var bottom = ((FrameworkElement)pane.Children[2]).TransformToVisual(pane).TransformPoint(new Windows.Foundation.Point()).Y;
+        Check(bottom - (top + QuickNavigation.ActualHeight) <= 14 && QuickNavigation.Margin.Top == 10, "Quick access does not fill the space above the actions.");
+        Check(SidebarExitButton.Command is null, "Sidebar exit still invokes a lock command.");
+        await SaveUsageSnapshot(Root, Path.Combine(output, "sidebar.png"));
+        Pass("left aligned sidebar and full height quick access");
+
+        var syntheticRegistryPath = @"Software\SecretManager\SyntheticTests\" + Guid.NewGuid().ToString("N");
+        try
+        {
+            var startup = new StartupRegistration(Path.Combine(output, "synthetic app.exe"), syntheticRegistryPath + @"\Run");
+            Check(!startup.Enabled, "Synthetic startup initially enabled.");
+            startup.SetEnabled(true); Check(startup.Enabled && startup.Command.EndsWith("\" --startup"), "Startup command did not round trip.");
+            startup.SetEnabled(false); Check(!startup.Enabled, "Startup registration did not clear.");
+        }
+        finally { Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(syntheticRegistryPath, false); }
+        Pass("startup registry enable and disable in isolated synthetic key");
+
+        StartWindowsServices(true); Root.UpdateLayout();
+        Check(!ViewModel.IsUnlocked && !AppWindow.IsVisible, "Windows startup did not hide a locked vault in the tray.");
+        ShowWindow(); await Login(password, true);
+        Pass("startup in tray remains locked and can be reopened");
 
         stage("lock while editing a field");
         var edit = Run(() => EditField(first.Id, null));
@@ -136,18 +201,30 @@ public sealed partial class MainWindow
         var pending = CompleteLater();
         ViewModel.Lock(); LoginPassword.Password = "changed synthetic UI password 123";
         Unlock_Click(this, new RoutedEventArgs());
-        ExitApplication();
+        Exit_Click(SidebarExitButton, new RoutedEventArgs());
         await Wait(() => closed.Task.IsCompleted, "window exit");
         release.TrySetResult(); await pending;
     }
     private void CheckAllToggles()
     {
-        foreach (var toggle in new[] { CompactChoice, SingleExpandedChoice, TrayChoice, LockHiddenChoice })
+        foreach (var toggle in new[] { CompactChoice, SingleExpandedChoice, TrayChoice, LockHiddenChoice, StartupChoice, AutoUpdateChoice })
             SecretManager.ThemeChecks.ThemeCheckWindow.CheckToggle(toggle);
     }
     private void CheckLocked() => Check(!ViewModel.IsUnlocked && ViewModel.Associations.Count == 0 && LoginView.Visibility == Visibility.Visible &&
         VaultView.Visibility == Visibility.Collapsed && SettingsPanel.Visibility == Visibility.Collapsed, "Lock did not clear and hide the vault UI.");
     private static void Check(bool condition, string error) { if (!condition) throw new InvalidOperationException(error); }
+    private static async Task SaveUsageSnapshot(FrameworkElement element, string path)
+    {
+        await Task.Delay(400); // Let native expansion and text rendering reach their final frame.
+        var bitmap = new Microsoft.UI.Xaml.Media.Imaging.RenderTargetBitmap(); await bitmap.RenderAsync(element);
+        var buffer = await bitmap.GetPixelsAsync(); var bytes = new byte[buffer.Length];
+        using (var reader = Windows.Storage.Streams.DataReader.FromBuffer(buffer)) reader.ReadBytes(bytes);
+        using var file = File.Create(path); using var stream = file.AsRandomAccessStream();
+        var encoder = await Windows.Graphics.Imaging.BitmapEncoder.CreateAsync(Windows.Graphics.Imaging.BitmapEncoder.PngEncoderId, stream);
+        encoder.SetPixelData(Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8, Windows.Graphics.Imaging.BitmapAlphaMode.Premultiplied,
+            (uint)bitmap.PixelWidth, (uint)bitmap.PixelHeight, 96, 96, bytes);
+        await encoder.FlushAsync();
+    }
     private static async Task Wait(Func<bool> ready, string operation)
     {
         var until = DateTime.UtcNow.AddSeconds(10);

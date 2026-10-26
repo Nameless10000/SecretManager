@@ -10,7 +10,8 @@ public static class VaultValidation
 
     public static void Validate(VaultDocument document)
     {
-        if (document.SchemaVersion != 1 || document.Associations is null || document.Settings is null)
+        if (document.SchemaVersion is not (1 or 2) || document.SchemaVersion == 2 && !document.IsPartial ||
+            document.Associations is null || document.Settings is null)
             throw new InvalidDataException("Неподдерживаемый формат хранилища.");
         if (document.Associations.Count > 10_000 || document.Associations.Any(a => a is null))
             throw new InvalidDataException("Слишком много ассоциаций или неверный формат.");

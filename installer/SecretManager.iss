@@ -5,7 +5,7 @@
   #define OutputDir "..\artifacts\installer"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.4"
+  #define AppVersion "0.1.5"
 #endif
 
 [Setup]
@@ -53,5 +53,15 @@ Name: "{autodesktop}\SecretManager"; Filename: "{app}\SecretManager.App.exe"; Ic
 
 [Run]
 Filename: "{app}\SecretManager.App.exe"; Description: "Запустить SecretManager"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\SecretManager.App.exe"; Flags: nowait runasoriginaluser; Check: IsAutomaticUpdate
 
-; Intentionally no UninstallDelete for LocalAppData\SecretManager: user vaults survive uninstall.
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "SecretManager"; Flags: uninsdeletevalue
+
+[Code]
+function IsAutomaticUpdate: Boolean;
+begin
+  Result := WizardSilent and (ExpandConstant('{param:AUTORESTART|0}') = '1');
+end;
+
+// Intentionally no UninstallDelete for LocalAppData\SecretManager: user vaults survive uninstall.

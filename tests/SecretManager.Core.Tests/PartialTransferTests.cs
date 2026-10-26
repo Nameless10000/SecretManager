@@ -23,6 +23,7 @@ public sealed class PartialTransferTests
     {
         var source = Sample(); var selected = VaultSelection.Select(source, FirstField(source));
         Assert.True(selected.IsPartial);
+        Assert.Equal(2, selected.SchemaVersion);
         Assert.Single(selected.Associations); Assert.Single(selected.Associations[0].Fields);
         Assert.Equal(2, source.Associations.Count); Assert.Equal(2, source.Associations[0].Fields.Count);
         selected.Associations[0].Fields.Clear(); Assert.Equal(2, source.Associations[0].Fields.Count);
@@ -36,6 +37,16 @@ public sealed class PartialTransferTests
         Assert.False(VaultSelection.Select(source, all).IsPartial);
         Assert.True(VaultSelection.Select(source with { IsPartial = true }, all).IsPartial);
         Assert.Empty(VaultSelection.Select(new(), new Dictionary<Guid, IReadOnlySet<Guid>>()).Associations);
+    }
+
+    [Fact]
+    public void PartialSchemaRequiresItsMarkerAndMergesIntoTheLocalFullSchema()
+    {
+        Assert.Throws<InvalidDataException>(() => VaultValidation.Validate(new() { SchemaVersion = 2 }));
+        var local = Sample(); var partial = VaultSelection.Select(local, FirstField(local));
+        var result = VaultMerge.Merge(local, partial, new Dictionary<Guid, ConflictResolution>());
+        Assert.Equal(1, result.SchemaVersion); Assert.False(result.IsPartial);
+        Assert.Equal(2, result.Associations[0].Fields.Count);
     }
 
     [Fact]
@@ -91,6 +102,7 @@ public sealed class PartialTransferTests
             Assert.DoesNotContain("synthetic omitted value", json);
             var imported = VaultSession.ReadExport(json, "12345678");
             Assert.True(imported.IsPartial); Assert.Single(imported.Associations); Assert.Single(imported.Associations[0].Fields);
+            Assert.Equal(2, imported.SchemaVersion);
             Assert.ThrowsAny<CryptographicException>(() => VaultSession.ReadExport(json, "87654321"));
             Assert.ThrowsAny<CryptographicException>(() => VaultCrypto.Unprotect(ExportPackage.Read(json), "12345678", VaultCrypto.LocalContext));
             Assert.Throws<ArgumentException>(() => session.Export("1234567"));

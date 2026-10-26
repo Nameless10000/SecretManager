@@ -35,6 +35,7 @@ public partial class App : Microsoft.UI.Xaml.Application
         {
             MainWindow = new MainWindow();
             MainWindow.Activate();
+            MainWindow.StartWindowsServices(Environment.GetCommandLineArgs().Contains("--startup"));
             MainWindow.Closed += (_, _) => { instance?.ReleaseMutex(); instance?.Dispose(); instance = null; };
         }
         catch (Exception ex) { AppDiagnostics.Journal.Record(AppEvent.StartupFailed, ex); throw; }

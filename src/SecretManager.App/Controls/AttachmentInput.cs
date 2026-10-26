@@ -31,27 +31,36 @@ public sealed class AttachmentInput : UserControl, IDisposable
     public AttachmentContent? Attachment { get; private set; }
     public string ErrorMessage => error.Text;
     public event Action? PickRequested;
+    public event Action? PasteRequested;
     public event Action? StateChanged;
 
     public AttachmentInput()
     {
         var panel = new StackPanel { Spacing = 12 };
-        var body = new StackPanel { Spacing = 8 };
+        var body = new StackPanel { Spacing = 8, IsHitTestVisible = false };
         body.Children.Add(new FontIcon { Glyph = "\uE898", FontSize = 28 }); body.Children.Add(heading); body.Children.Add(details); body.Children.Add(preview);
         dropZone = new Border { Child = body, Padding = new Thickness(18), MinHeight = 130, CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1), AllowDrop = true, BorderBrush = borderBrush };
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         actions.Children.Add(pick); actions.Children.Add(paste);
         panel.Children.Add(dropZone); panel.Children.Add(actions); panel.Children.Add(fileName); panel.Children.Add(error); Content = panel;
-        pick.Click += (_, _) => PickRequested?.Invoke(); paste.Click += async (_, _) => await PasteFromClipboardAsync();
-        dropZone.DragOver += (_, e) =>
+        AllowDrop = true;
+        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+        if (new System.Security.Principal.WindowsPrincipal(identity).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator))
+        {
+            AllowDrop = dropZone.AllowDrop = false;
+            panel.Children.Add(new TextBlock { Text = "Windows ограничивает перетаскивание при запуске от администратора. Используйте «Выбрать файл» или запустите приложение обычным способом.", TextWrapping = TextWrapping.Wrap, FontSize = 12 });
+        }
+        pick.Click += (_, _) => PickRequested?.Invoke();
+        paste.Click += async (_, _) => { if (PasteRequested is { } requested) requested(); else await PasteFromClipboardAsync(); };
+        DragOver += (_, e) =>
         {
             var accepted = !disposed && isCurrent() && (e.DataView.Contains(StandardDataFormats.StorageItems) || ImagesOnly && e.DataView.Contains(StandardDataFormats.Bitmap));
             e.AcceptedOperation = accepted ? DataPackageOperation.Copy : DataPackageOperation.None;
             e.Handled = true;
             if (accepted) { dropZone.BorderBrush = accentBrush; e.DragUIOverride.Caption = ImagesOnly ? "Добавить изображение" : "Добавить файл"; e.DragUIOverride.IsCaptionVisible = true; }
         };
-        dropZone.DragLeave += (_, _) => dropZone.BorderBrush = borderBrush;
-        dropZone.Drop += async (_, e) =>
+        DragLeave += (_, _) => dropZone.BorderBrush = borderBrush;
+        Drop += async (_, e) =>
         {
             var deferral = e.GetDeferral();
             try { e.Handled = true; await ReadDataAsync(e.DataView); e.AcceptedOperation = ErrorMessage.Length == 0 && IsValidForCurrentMode ? DataPackageOperation.Copy : DataPackageOperation.None; }
@@ -75,8 +84,8 @@ public sealed class AttachmentInput : UserControl, IDisposable
     {
         revision++; IsBusy = false; pick.IsEnabled = paste.IsEnabled = true; ImagesOnly = imagesOnly;
         heading.Text = imagesOnly ? "Перетащите сюда изображение" : "Перетащите сюда файл";
-        details.Text = imagesOnly ? "PNG / JPEG до 10 МБ · также можно вставить из буфера" : "Один файл любого формата до 10 МБ";
-        paste.Visibility = imagesOnly ? Visibility.Visible : Visibility.Collapsed;
+        details.Text = imagesOnly ? "PNG / JPEG до 10 МБ · также можно вставить из буфера" : "Один файл до 10 МБ · можно скопировать в Проводнике и вставить сюда";
+        paste.Visibility = Visibility.Visible;
         preview.Visibility = imagesOnly && preview.Source is not null ? Visibility.Visible : Visibility.Collapsed;
         error.Text = ""; IsValidForCurrentMode = Attachment is not null && !imagesOnly;
         StateChanged?.Invoke();
@@ -93,8 +102,9 @@ public sealed class AttachmentInput : UserControl, IDisposable
         finally { CryptographicOperations.ZeroMemory(bytes); }
     }
     public Task SetFileAsync(StorageFile file) => LoadAsync(() => importer.FromFileAsync(file, ImagesOnly));
+    public Task SetPathAsync(string path) => LoadAsync(() => importer.FromPathAsync(path, ImagesOnly));
     public Task ReadDataAsync(DataPackageView data) => LoadAsync(() => importer.FromDataAsync(data, ImagesOnly));
-    public Task PasteFromClipboardAsync() => LoadAsync(() => importer.FromDataAsync(Windows.ApplicationModel.DataTransfer.Clipboard.GetContent(), true));
+    public Task PasteFromClipboardAsync() => LoadAsync(() => importer.FromDataAsync(Windows.ApplicationModel.DataTransfer.Clipboard.GetContent(), ImagesOnly));
 
     private async Task LoadAsync(Func<Task<AttachmentContent>> read)
     {

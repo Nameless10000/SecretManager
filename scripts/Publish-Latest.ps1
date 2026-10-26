@@ -42,6 +42,9 @@ try {
         $upload = "https://uploads.github.com/repos/$Repository/releases/$($release.id)/assets?name=$([uri]::EscapeDataString($name))"
         Invoke-RestMethod -Method Post -Uri $upload -Headers $headers -ContentType 'application/octet-stream' -InFile (Join-Path $installerFolder $name) | Out-Null
     }
+    [xml]$project = Get-Content (Join-Path $projectRoot 'src\SecretManager.App\SecretManager.App.csproj')
+    $releaseName = 'SecretManager ' + [string]$project.Project.PropertyGroup.Version
+    Invoke-RestMethod -Method Patch -Uri "$api/releases/$($release.id)" -Headers $headers -ContentType 'application/json' -Body (@{name=$releaseName} | ConvertTo-Json) | Out-Null
     Write-Output $release.html_url
 }
 finally { $headers.Clear(); $credential.Clear(); $credentialLines = $null; Pop-Location }

@@ -34,3 +34,7 @@ jobs:
           }
           gh release upload latest artifacts/installer/SecretManager-Setup.exe artifacts/installer/SecretManager-Setup.sha256 --clobber
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed' }
+          [xml]$project = Get-Content src/SecretManager.App/SecretManager.App.csproj
+          $version = [string]$project.Project.PropertyGroup.Version
+          gh release edit latest --title "SecretManager $version"
+          if ($LASTEXITCODE -ne 0) { throw 'Release version update failed' }

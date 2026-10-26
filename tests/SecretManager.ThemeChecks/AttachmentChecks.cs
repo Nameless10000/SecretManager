@@ -27,6 +27,8 @@ internal static class AttachmentChecks
         input.Configure(new() { Theme = AppTheme.Dark }, true, () => active);
         card.Content = input;
         await input.SetImageModeAsync(false);
+        await input.SetPathAsync(binaryPath);
+        Check(input.IsValidForCurrentMode && Convert.FromBase64String(input.Attachment!.Base64).SequenceEqual(binary), "Desktop picker path did not load exact bytes.");
         var fileDrop = new DataPackage(); fileDrop.SetStorageItems([binaryFile]);
         await input.ReadDataAsync(fileDrop.GetView());
         Check(input.IsValidForCurrentMode && input.Attachment?.FileName == "key.bin", "File drop was not accepted.");
@@ -41,7 +43,7 @@ internal static class AttachmentChecks
         using var jpegStream = await MakeImage(BitmapEncoder.JpegEncoderId);
         var jpegPath = Path.Combine(folderPath, "sample.jpg");
         using (var source = jpegStream.AsStreamForRead()) using (var target = File.Create(jpegPath)) await source.CopyToAsync(target);
-        await input.SetFileAsync(await StorageFile.GetFileFromPathAsync(jpegPath));
+        await input.SetPathAsync(jpegPath);
         Check(input.IsValidForCurrentMode && input.Attachment?.ContentType == "image/jpeg", "JPEG import failed.");
         var previous = input.Attachment;
         var multiple = new DataPackage(); multiple.SetStorageItems([pngFile, binaryFile]);
@@ -75,6 +77,18 @@ internal static class AttachmentChecks
         }
         await snapshot("image-paste.png");
 
+        var pastedKind = FieldKind.Secret; var pasteError = "";
+        using var paste = new AttachmentPasteHandler(input, input, async images =>
+        { pastedKind = images ? FieldKind.Image : FieldKind.File; await input.SetImageModeAsync(images); }, () => active, message => pasteError = message);
+        Check(!await paste.PasteAsync(text.GetView()), "Text-only clipboard was intercepted instead of native text paste.");
+        Check(await paste.PasteAsync(fileDrop.GetView()) && pastedKind == FieldKind.File && input.Attachment?.FileName == "key.bin", "Paste did not automatically select file mode.");
+        Check(await paste.PasteAsync(pngDrop.GetView()) && pastedKind == FieldKind.Image && input.Attachment?.ContentType == "image/png", "Paste did not automatically select image mode for PNG.");
+        bitmapStream.Seek(0);
+        Check(await paste.PasteAsync(bitmapData.GetView()) && pastedKind == FieldKind.Image && input.IsValidForCurrentMode, "Bitmap paste did not work from another field kind.");
+        var beforeRejectedPaste = input.Attachment;
+        await paste.PasteAsync(multiple.GetView());
+        Check(pasteError.Length > 0 && input.Attachment == beforeRejectedPaste, "Multiple-file paste replaced an existing attachment.");
+
         // Simulate a delayed clipboard provider while the editor/session is being closed.
         var requested = new TaskCompletionSource(); var release = new TaskCompletionSource();
         var delayed = new DataPackage();
@@ -84,10 +98,10 @@ internal static class AttachmentChecks
             try { requested.TrySetResult(); await release.Task; request.SetData(bitmapReference); }
             finally { deferral.Complete(); }
         });
-        var pending = input.ReadDataAsync(delayed.GetView());
-        await requested.Task; active = false; input.Dispose(); release.TrySetResult(); await pending;
+        var pending = paste.PasteAsync(delayed.GetView());
+        await requested.Task; active = false; paste.Dispose(); input.Dispose(); release.TrySetResult(); await pending;
         Check(input.Attachment is null && !input.IsValidForCurrentMode, "A stale provider restored data after the editor was closed.");
-        return 11;
+        return 16;
     }
     private static void Check(bool condition, string message) { if (!condition) throw new InvalidOperationException(message); }
     internal static async Task<InMemoryRandomAccessStream> MakeImage(Guid encoderId)

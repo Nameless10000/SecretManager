@@ -18,11 +18,14 @@ public static class VaultSelection
         }
         var associations = source.Associations.Where(a => selection.ContainsKey(a.Id))
             .Select(a => a with { Fields = a.Fields.Where(f => selection[a.Id].Contains(f.Id)).ToList() }).ToList();
+        var partial = source.IsPartial || associations.Count != source.Associations.Count ||
+            associations.Any(a => a.Fields.Count != known[a.Id].Fields.Count);
         return source with
         {
             Associations = associations,
-            IsPartial = source.IsPartial || associations.Count != source.Associations.Count ||
-                associations.Any(a => a.Fields.Count != known[a.Id].Fields.Count)
+            IsPartial = partial,
+            // Older clients reject v2 instead of silently replacing a whole topic with a partial one.
+            SchemaVersion = partial ? 2 : 1
         };
     }
 }

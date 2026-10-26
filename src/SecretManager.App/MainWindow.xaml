@@ -7,7 +7,10 @@
  Title="SecretManager">
  <Grid x:Name="Root" Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
   <Grid.Resources><services:ThemeResources/></Grid.Resources>
-  <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+  <Grid.RowDefinitions><RowDefinition Height="44"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+  <InfoBar x:Name="UpdateNotice" Grid.Row="2" IsOpen="False" IsClosable="True" Severity="Informational" Title="Обновление">
+   <InfoBar.ActionButton><Button x:Name="InstallUpdateButton" Content="Установить и перезапустить" Click="InstallUpdate_Click" Visibility="Collapsed"/></InfoBar.ActionButton>
+  </InfoBar>
   <Grid x:Name="TitleBar" Background="Transparent" Padding="20,0,148,0">
    <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
     <FontIcon Glyph="&#xE72E;" FontSize="16" Foreground="{ThemeResource SystemControlHighlightAccentBrush}"/>
@@ -42,18 +45,19 @@
       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
       <StackPanel Spacing="14">
        <TextBlock Text="ПРОСТРАНСТВО" FontSize="10" FontWeight="SemiBold" CharacterSpacing="120" Foreground="{ThemeResource VaultSecondaryTextBrush}" Margin="12,0,0,4"/>
-       <Button HorizontalAlignment="Stretch" Click="All_Click" Padding="12,10"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8F1;" FontSize="17"/><TextBlock Text="Все ассоциации"/></StackPanel></Button>
+       <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Click="All_Click" Padding="12,10"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8F1;" FontSize="17"/><TextBlock Text="Все ассоциации"/></StackPanel></Button>
        <TextBlock Text="БЫСТРЫЙ ПЕРЕХОД" FontSize="10" CharacterSpacing="100" Foreground="{ThemeResource VaultSecondaryTextBrush}" Margin="12,16,0,0"/>
       </StackPanel>
-      <ListView x:Name="QuickNavigation" Grid.Row="1" Margin="0,122,0,12" ItemsSource="{x:Bind ViewModel.Associations}" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="QuickNavigation_ItemClick" Background="Transparent">
-       <ListView.ItemTemplate><DataTemplate x:DataType="vm:AssociationViewModel"><TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" Padding="2,6"/></DataTemplate></ListView.ItemTemplate>
+      <ListView x:Name="QuickNavigation" Grid.Row="1" Margin="0,10,0,12" HorizontalContentAlignment="Stretch" ItemsSource="{x:Bind ViewModel.Associations}" SelectionMode="Single" IsItemClickEnabled="True" ItemClick="QuickNavigation_ItemClick" Background="Transparent">
+       <ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="12,6"/></Style></ListView.ItemContainerStyle>
+       <ListView.ItemTemplate><DataTemplate x:DataType="vm:AssociationViewModel"><TextBlock Text="{x:Bind Title}" TextAlignment="Left" TextTrimming="CharacterEllipsis"/></DataTemplate></ListView.ItemTemplate>
       </ListView>
       <StackPanel Grid.Row="2" Spacing="6">
-       <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" Click="Import_Click"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8B5;" FontSize="17"/><TextBlock Text="Импорт"/></StackPanel></Button>
-       <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" Click="Export_Click"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE8B6;" FontSize="17"/><TextBlock Text="Экспорт"/></StackPanel></Button>
-       <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" Click="Help_Click"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE897;" FontSize="17"/><TextBlock Text="Инструкция и FAQ"/></StackPanel></Button>
+       <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" HorizontalContentAlignment="Left" Padding="12,10" Click="Import_Click"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Width="18" Height="18" Data="M 8,0 L 10,0 L 10,11.2 L 13,8.2 L 14.4,9.6 L 9,15 L 3.6,9.6 L 5,8.2 L 8,11.2 Z M 1,15 L 17,15 L 17,17 L 1,17 Z"/><TextBlock Text="Импорт"/></StackPanel></Button>
+       <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" HorizontalContentAlignment="Left" Padding="12,10" Click="Export_Click"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Width="18" Height="18" Data="M 8,15 L 8,4 L 5,7 L 3.6,5.6 L 9,0.2 L 14.4,5.6 L 13,7 L 10,4 L 10,15 Z M 1,15 L 17,15 L 17,17 L 1,17 Z"/><TextBlock Text="Экспорт"/></StackPanel></Button>
+       <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" HorizontalContentAlignment="Left" Padding="12,10" Click="Help_Click"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE897;" FontSize="17"/><TextBlock Text="FAQ"/></StackPanel></Button>
        <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,10"/>
-       <Button HorizontalAlignment="Stretch" Style="{StaticResource QuietButton}" Command="{x:Bind ViewModel.LockCommand}"><StackPanel Orientation="Horizontal" Spacing="12"><FontIcon Glyph="&#xE72E;" FontSize="17"/><TextBlock Text="Заблокировать"/></StackPanel></Button>
+       <Button x:Name="SidebarExitButton" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Style="{StaticResource QuietButton}" Click="Exit_Click" Padding="12,10"><StackPanel Orientation="Horizontal" Spacing="12"><PathIcon Width="18" Height="18" Data="M 1,0 L 9,0 L 9,2 L 3,2 L 3,16 L 9,16 L 9,18 L 1,18 Z M 9,8 L 14,8 L 11,5 L 12.4,3.6 L 17.8,9 L 12.4,14.4 L 11,13 L 14,10 L 9,10 Z"/><TextBlock Text="Выйти"/></StackPanel></Button>
        <TextBlock Text="Только на вашем устройстве" FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" Margin="12,8,0,0"/>
       </StackPanel>
      </Grid>
@@ -125,10 +129,12 @@
      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel Spacing="14" Padding="0,0,8,8">
       <TextBlock Text="Оформление" FontSize="16" FontWeight="SemiBold"/>
       <ComboBox x:Name="ThemeChoice" Header="Тема" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Системная</x:String><x:String>Светлая</x:String><x:String>Тёмная</x:String><x:String>Полночь</x:String><x:String>Лесная</x:String><x:String>Своя тема</x:String></ComboBox>
-      <StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="AccentButton" Content="Цвет акцента" Click="AccentColor_Click"/><Button x:Name="BackgroundButton" Content="Цвет фона" Click="BackgroundColor_Click"/></StackPanel>
+      <StackPanel Spacing="8"><Button x:Name="AccentButton" Content="Цвет акцента" Click="AccentColor_Click" HorizontalAlignment="Stretch"/><Button x:Name="BackgroundButton" Content="Цвет фона" Click="BackgroundColor_Click" HorizontalAlignment="Stretch"/></StackPanel>
       <TextBlock Text="Собственные цвета применяются к «Своей теме». Контраст текста подбирается автоматически." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
-      <ComboBox x:Name="FontChoice" Header="Шрифт" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Segoe UI Variable</x:String><x:String>Segoe UI</x:String><x:String>Arial</x:String><x:String>Calibri</x:String><x:String>Consolas</x:String></ComboBox>
-      <NumberBox x:Name="FontSizeChoice" Header="Размер текста" Minimum="12" Maximum="20" SmallChange="1" SpinButtonPlacementMode="Compact" ValueChanged="AppearanceNumber_Changed"/>
+      <ComboBox x:Name="FontChoice" Header="Шрифт" HorizontalAlignment="Stretch" SelectionChanged="Appearance_Changed"><x:String>Segoe UI Variable</x:String><x:String>Segoe UI</x:String><x:String>Arial</x:String><x:String>Calibri</x:String><x:String>Consolas</x:String><x:String>Comic Sans MS</x:String></ComboBox>
+      <TextBlock Text="Размер текста · 10–26 пунктов" FontSize="12" TextWrapping="Wrap"/>
+      <Slider x:Name="FontSizeChoice" Minimum="10" Maximum="26" StepFrequency="1" TickFrequency="1" SnapsTo="StepValues" ValueChanged="AppearanceSlider_Changed"/>
+      <Grid><TextBlock Text="Мелкий" FontSize="11"/><TextBlock Text="Крупный" FontSize="11" HorizontalAlignment="Right"/></Grid>
       <TextBlock Text="Скругление карточек" FontSize="12"/>
       <Slider x:Name="RadiusChoice" Minimum="0" Maximum="28" StepFrequency="1" ValueChanged="AppearanceSlider_Changed"/>
       <ToggleSwitch x:Name="CompactChoice" Header="Компактный список" Toggled="AppearanceToggle_Changed"/>
@@ -148,6 +154,13 @@
       <TextBlock Text="0 отключает соответствующий таймер." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
       <ToggleSwitch x:Name="TrayChoice" Header="Закрытие крестиком — в трей"/>
       <ToggleSwitch x:Name="LockHiddenChoice" Header="Сразу блокировать при уходе в трей"/>
+      <ToggleSwitch x:Name="StartupChoice" Header="Запускать при входе в Windows"/>
+      <TextBlock Text="Запускается заблокированным в трее. Windows позволяет отключить автозапуск в диспетчере задач." FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
+      <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
+      <TextBlock Text="Обновления" FontSize="16" FontWeight="SemiBold"/>
+      <ToggleSwitch x:Name="AutoUpdateChoice" Header="Автообновление при запуске"/>
+      <TextBlock Text="Проверка и загрузка с GitHub. Установка выполняется после блокировки хранилища. Данные хранилища в сеть не отправляются." FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
+      <Button Content="Проверить обновления" Click="CheckUpdates_Click" HorizontalAlignment="Stretch"/>
       <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
       <TextBlock Text="Диагностика" FontSize="16" FontWeight="SemiBold"/>
       <Button Content="Открыть папку журналов" Click="OpenDiagnostics_Click" HorizontalAlignment="Stretch"/>

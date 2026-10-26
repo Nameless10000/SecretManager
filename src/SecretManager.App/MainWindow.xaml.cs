@@ -14,7 +14,6 @@ using SecretManager.Core.Security;
 using SecretManager.Core.Services;
 using Windows.Graphics;
 using Windows.Graphics.Imaging;
-using Windows.Storage.Pickers;
 using Windows.Storage.Streams;
 using Windows.System;
 
@@ -65,7 +64,7 @@ public sealed partial class MainWindow : Window
         {
             if (!exiting && !applyingAppearance && (appearancePreview ?? ViewModel.Settings).Theme == AppTheme.System) ApplyAppearance();
         };
-        timer.Tick += (_, _) => CheckFocusTimeout(); timer.Start();
+        timer.Tick += (_, _) => { CheckFocusTimeout(); TryApplyAutomaticUpdate(); }; timer.Start();
         SystemEvents.SessionSwitch += SystemEvents_SessionSwitch;
         var lockKey = new KeyboardAccelerator { Key = VirtualKey.L, Modifiers = VirtualKeyModifiers.Control };
         lockKey.Invoked += (_, e) => { if (!exiting) ViewModel.Lock(); e.Handled = true; };
@@ -244,12 +243,10 @@ public sealed partial class MainWindow : Window
         {
             try
             {
-                var picker = new FileOpenPicker(); WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-                if (kind.SelectedIndex == 2) { picker.FileTypeFilter.Add(".png"); picker.FileTypeFilter.Add(".jpg"); picker.FileTypeFilter.Add(".jpeg"); }
-                else picker.FileTypeFilter.Add("*");
-                var file = await picker.PickSingleFileAsync(); RequireSession(captured);
+                var file = await FilePickerService.OpenAsync(AppWindow.Id, hwnd, "Добавить вложение",
+                    kind.SelectedIndex == 2 ? [".png", ".jpg", ".jpeg"] : ["*"]); RequireSession(captured);
                 if (file is null) return;
-                await attachment.SetFileAsync(file); RequireSession(captured); error.Text = "";
+                await attachment.SetPathAsync(file); RequireSession(captured); error.Text = "";
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or InvalidOperationException)
@@ -273,13 +270,10 @@ public sealed partial class MainWindow : Window
         RequireSession(captured);
         var dialog = Dialog(existing is null ? "Добавить поле" : "Редактирование поля", panel, "Сохранить");
         attachment.StateChanged += () => dialog.IsPrimaryButtonEnabled = !attachment.IsBusy;
-        var pasteShortcut = new KeyboardAccelerator { Key = VirtualKey.V, Modifiers = VirtualKeyModifiers.Control };
-        pasteShortcut.Invoked += async (_, args) =>
-        {
-            if (kind.SelectedIndex != 2 || FocusManager.GetFocusedElement(Root.XamlRoot) is TextBox or PasswordBox or RichEditBox) return;
-            args.Handled = true; await attachment.PasteFromClipboardAsync();
-        };
-        dialog.KeyboardAccelerators.Add(pasteShortcut);
+        using var pasteShortcut = new AttachmentPasteHandler(dialog, attachment, async images =>
+        { kind.SelectedIndex = images ? 2 : 3; await SwitchKind(); },
+            () => ViewModel.IsUnlocked && captured == epoch, message => error.Text = message);
+        attachment.PasteRequested += async () => await pasteShortcut.PasteFromClipboardAsync();
         SecretField? saved = null;
         dialog.PrimaryButtonClick += (_, args) =>
         {
@@ -344,7 +338,7 @@ public sealed partial class MainWindow : Window
     {
         var captured = epoch;
         var panel = Form();
-        var explanation = new TextBlock { Text = confirm ? "Задайте отдельный пароль от 12 символов. Он понадобится для импорта на другом устройстве." : "Введите пароль, заданный при экспорте файла.", TextWrapping = TextWrapping.Wrap, Opacity = .65 };
+        var explanation = new TextBlock { Text = confirm ? "Задайте отдельный пароль от 8 символов. Он понадобится для импорта на другом устройстве." : "Введите пароль, заданный при экспорте файла.", TextWrapping = TextWrapping.Wrap, Opacity = .65 };
         var password = new PasswordBox { Header = "Пароль экспорта" };
         var repeat = new PasswordBox { Header = "Повторите пароль", Visibility = confirm ? Visibility.Visible : Visibility.Collapsed };
         var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
@@ -352,7 +346,7 @@ public sealed partial class MainWindow : Window
         var dialog = Dialog(title, panel, "Продолжить");
         dialog.PrimaryButtonClick += (_, args) =>
         {
-            try { if (confirm) { VaultCrypto.ValidateNewPassword(password.Password); if (password.Password != repeat.Password) throw new ArgumentException("Пароли не совпадают."); } }
+            try { if (confirm) { VaultCrypto.ValidateExportPassword(password.Password); if (password.Password != repeat.Password) throw new ArgumentException("Пароли не совпадают."); } }
             catch (ArgumentException ex) { error.Text = ex.Message; args.Cancel = true; }
         };
         try { var result = await ShowDialog(dialog); RequireSession(captured); return result == ContentDialogResult.Primary ? password.Password : null; }
@@ -360,36 +354,37 @@ public sealed partial class MainWindow : Window
     }
     private async void Export_Click(object sender, RoutedEventArgs e) => await Run(async () =>
     {
-        var captured = epoch; var password = await AskPassword("Зашифрованная резервная копия", true);
+        var captured = epoch;
+        var selection = await AskSelection(ViewModel.TransferDocument, "Что экспортировать?"); RequireSession(captured);
+        if (selection is null) return;
+        var password = await AskPassword("Зашифрованная резервная копия", true);
         if (password is null) return;
-        var encrypted = await ViewModel.ExportAsync(password); password = ""; RequireSession(captured);
-        var picker = new FileSavePicker { SuggestedFileName = "SecretManager-backup" };
-        picker.FileTypeChoices.Add("Зашифрованное хранилище", [".smvault"]); WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-        var file = await picker.PickSaveFileAsync(); RequireSession(captured); if (file is null) return;
-        await File.WriteAllTextAsync(file.Path, encrypted); RequireSession(captured);
+        var encrypted = await ViewModel.ExportAsync(password, selection); password = ""; RequireSession(captured);
+        var file = await FilePickerService.SaveAsync(AppWindow.Id, hwnd); RequireSession(captured); if (file is null) return;
+        await File.WriteAllTextAsync(file, encrypted); RequireSession(captured);
         Notify("Зашифрованная копия сохранена. SHA-256 и AES-GCM защищают целостность.");
     });
     private async void Import_Click(object sender, RoutedEventArgs e) => await Run(async () =>
     {
         var captured = epoch;
-        var picker = new FileOpenPicker(); picker.FileTypeFilter.Add(".smvault"); WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-        var file = await picker.PickSingleFileAsync(); RequireSession(captured); if (file is null) return;
-        var properties = await file.GetBasicPropertiesAsync(); RequireSession(captured);
-        if (properties.Size > ExportPackage.MaxPackageBytes) throw new InvalidDataException("Файл экспорта слишком велик.");
+        var file = await FilePickerService.OpenAsync(AppWindow.Id, hwnd, "Импорт хранилища", ".smvault"); RequireSession(captured); if (file is null) return;
         string json;
-        using (var input = new FileStream(file.Path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
+        using (var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan))
             json = await ExportPackage.ReadTextAsync(input);
         RequireSession(captured);
         _ = ExportPackage.Read(json); // Check SHA-256 before asking for a password or changing any local data.
         var password = await AskPassword("Импорт резервной копии", false); if (password is null) return;
         var imported = await Task.Run(() => VaultSession.ReadExport(json, password)); password = ""; RequireSession(captured);
+        var selection = await AskSelection(imported, "Что импортировать?"); RequireSession(captured);
+        if (selection is null) return;
+        imported = VaultSelection.Select(imported, selection);
         var choices = new Dictionary<Guid, ConflictResolution>();
         foreach (var conflict in ViewModel.FindConflicts(imported))
         {
             var panel = Form();
             panel.Children.Add(new TextBlock { Text = $"Ассоциация «{conflict.Local.Title}» уже существует и отличается.\nЛокально: {conflict.Local.Fields.Count} полей, {conflict.Local.UpdatedAt.ToLocalTime():g}\nВ файле: {conflict.Imported.Fields.Count} полей, {conflict.Imported.UpdatedAt.ToLocalTime():g}", TextWrapping = TextWrapping.Wrap });
             var choice = new ComboBox { HorizontalAlignment = HorizontalAlignment.Stretch };
-            foreach (var name in new[] { "Оставить локальную", "Заменить импортированной", "Сохранить обе" }) choice.Items.Add(name);
+            foreach (var name in new[] { "Оставить локальную", imported.IsPartial ? "Обновить выбранные поля" : "Заменить импортированной", "Сохранить обе" }) choice.Items.Add(name);
             choice.SelectedIndex = 0; panel.Children.Add(choice);
             var result = await ShowDialog(Dialog("Конфликт импорта", panel, "Продолжить")); RequireSession(captured);
             if (result != ContentDialogResult.Primary) return; // No writes until every conflict has been resolved.
@@ -397,6 +392,17 @@ public sealed partial class MainWindow : Window
         }
         ViewModel.Import(imported, choices); Notify("Импорт завершён. Ассоциации и поля объединены, настройки устройства сохранены.");
     });
+
+    private async Task<Dictionary<Guid, IReadOnlySet<Guid>>?> AskSelection(VaultDocument document, string title)
+    {
+        var captured = epoch;
+        using var selection = new TransferSelection(document);
+        var dialog = Dialog(title, selection, "Продолжить");
+        selection.SelectionChanged += () => dialog.IsPrimaryButtonEnabled = selection.HasSelection;
+        dialog.PrimaryButtonClick += (_, args) => { if (!selection.HasSelection) args.Cancel = true; };
+        var result = await ShowDialog(dialog); RequireSession(captured);
+        return result == ContentDialogResult.Primary ? selection.Capture() : null;
+    }
 
     private void LoadSettings()
     {
@@ -408,6 +414,8 @@ public sealed partial class MainWindow : Window
         AnimationChoice.SelectedIndex = (int)s.AnimationLevel; MotionSpeedChoice.Value = s.MotionSpeed;
         LockMinutesChoice.Value = s.AutoLockMinutes; ClipboardSecondsChoice.Value = s.ClipboardClearSeconds;
         TrayChoice.IsOn = s.CloseToTray; LockHiddenChoice.IsOn = s.LockWhenHidden;
+        StartupChoice.IsOn = startupRegistration.Enabled;
+        AutoUpdateChoice.IsOn = DevicePreferences.Load(AppPaths.DataDirectory).AutomaticUpdates;
         loadingSettings = false;
     }
     private AppSettings ReadSettings() => ViewModel.Settings with
@@ -431,6 +439,8 @@ public sealed partial class MainWindow : Window
         AppDiagnostics.Journal.Record(AppEvent.AppearanceApplying);
         var settings = appearancePreview ?? ViewModel.Settings;
         var palette = ThemeService.Apply(Root, settings);
+        Navigation.OpenPaneLength = Math.Clamp(218 * settings.FontSize / 14, 218, 360);
+        SettingsPanel.Width = Math.Clamp(360 * settings.FontSize / 20, 360, 480);
         var titleBar = AppWindow.TitleBar;
         titleBar.ButtonForegroundColor = ThemeService.ParseColor(palette.Foreground);
         titleBar.ButtonInactiveForegroundColor = ThemeService.ParseColor(palette.Secondary);
@@ -451,7 +461,6 @@ public sealed partial class MainWindow : Window
         appearancePreview = ReadSettings(); ApplyAppearance();
     }
     private void Appearance_Changed(object sender, SelectionChangedEventArgs e) => PreviewAppearance();
-    private void AppearanceNumber_Changed(NumberBox sender, NumberBoxValueChangedEventArgs args) => PreviewAppearance();
     private void AppearanceSlider_Changed(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e) => PreviewAppearance();
     private void AppearanceToggle_Changed(object sender, RoutedEventArgs e) => PreviewAppearance();
     private async void AccentColor_Click(object sender, RoutedEventArgs e) => await Run(() => PickColor(true));
@@ -467,7 +476,7 @@ public sealed partial class MainWindow : Window
     }
     private async void SaveSettings_Click(object sender, RoutedEventArgs e) => await Run(() =>
     {
-        ViewModel.SaveSettings(ReadSettings()); appearancePreview = null; ApplyAppearance(); Notify("Настройки сохранены"); return Task.CompletedTask;
+        ViewModel.SaveSettings(ReadSettings()); SaveDevicePreferences(); appearancePreview = null; ApplyAppearance(); Notify("Настройки сохранены"); return Task.CompletedTask;
     });
     private async void OpenDiagnostics_Click(object sender, RoutedEventArgs e) => await Run(() =>
     {
@@ -500,6 +509,7 @@ public sealed partial class MainWindow : Window
     });
 
     private void Menu_Click(object sender, RoutedEventArgs e) { Navigation.IsPaneOpen = !Navigation.IsPaneOpen; motion.Enter(AssociationList); }
+    private void Exit_Click(object sender, RoutedEventArgs e) => ExitApplication();
     private void All_Click(object sender, RoutedEventArgs e) { ViewModel.Query = ""; foreach (var a in ViewModel.Associations) a.IsExpanded = false; }
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
@@ -523,9 +533,9 @@ public sealed partial class MainWindow : Window
         var text = new TextBlock
         {
             MaxWidth = 620, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
-            Text = "БЫСТРЫЙ СТАРТ\n\n1. Создайте мастер-пароль от 12 символов. Сохраните его в надёжном месте.\n2. Нажмите «Новая ассоциация»: например, GitHub или почта.\n3. Раскройте карточку → «Добавить поле». Полей может быть сколько угодно: логин, пароль, PublicKey, заметка, изображение или файл. В зоне вложения можно перетащить один файл. Для картинки доступны «Вставить из буфера» и Ctrl+V вне текстового поля описания.\n4. Нажмите значение или кнопку копирования. Картинка одновременно копируется и открывается крупно.\n5. В меню слева → «Экспорт»: сохраните зашифрованный .smvault с отдельным паролем. На другом компьютере создайте локальное хранилище → «Импорт».\n\nПОИСК\n\nИщет только названия, без учёта регистра. Можно вводить начало слова или несколько слов. Достаточно совпадения любого из них: «Почта Mail» найдёт и «Почта 1», и «Mail». Кириллица поддерживается. В настройках можно включить раскрытие только одной карточки. Значения полей в поиск не попадают.\n\nКАК ЗАЩИЩЕНЫ ДАННЫЕ?\n\nSQLite содержит зашифрованные названия, описания, значения и вложения. Файлы сначала преобразуются в base64, затем шифруются. Base64 не является защитой. Экспорт проверяется по SHA-256, затем по тегу AES-GCM: пересчёт хешсуммы не позволяет подменить данные.\n\nЧТО ДЕЛАЕТ ИМПОРТ?\n\nОбъединяет ассоциации. При совпадении идентификатора или названия предложит оставить локальную, заменить её или сохранить обе. До разрешения всех конфликтов база не меняется. Настройки внешнего вида и блокировки устройства сохраняются локальными.\n\nЗАБЫЛ МАСТЕР-ПАРОЛЬ\n\nВосстановления нет. Создайте хранилище на другом устройстве и импортируйте резервную копию с известным паролем экспорта. Регулярно делайте резервные копии.\n\nБЛОКИРОВКА И ТРЕЙ\n\nCtrl+L блокирует сразу, Ctrl+F переводит фокус в поиск. По умолчанию окно блокируется после 5 минут без фокуса. Крестик скрывает окно в трей и блокирует сразу. Значок: жёлтый замок — заблокировано, зелёный — открыто. Левый клик возвращает окно; правый клик → «Выйти» завершает процесс. Таймеры и поведение крестика настраиваются, 0 отключает таймер. Блокировка Windows также блокирует хранилище.\n\nБУФЕР И ФАЙЛЫ\n\nБуфер очищается через 30 секунд, только если в нём остались наши данные. История и облачный буфер Windows отключены для этих копирований. При блокировке данные приложения в буфере очищаются. Другие программы могут успеть прочитать буфер раньше. Для копирования произвольного файла создаётся временный файл в LocalAppData, который удаляется при очистке. Вложение: до 10 МБ, снимок: до 64 МБ. Предпросмотр: PNG/JPEG до 40 Мп.\n\nТЕМЫ И АНИМАЦИИ\n\nНастройки справа: системная, светлая, тёмная, полночь, лесная или собственная тема. Собственная тема позволяет выбрать фон и акцент. Шрифт, размер, скругления и плотность доступны во всех темах. Изменения оформления видны сразу; «Сохранить настройки» закрепляет их. Закрытие панели отменяет несохранённый предпросмотр. Декоративные анимации: выключены, умеренные, максимальные. Скорость регулируется у подсветки и пружинного отклика при наведении и нажатии. Раскрытие и сворачивание карточек, появление содержимого и стандартные состояния элементов имеют постоянный темп. Системное отключение движения имеет приоритет.\n\nЖУРНАЛ ОШИБОК\n\nНастройки → «Открыть папку журналов». Файлы application.log и application.previous.log содержат время UTC, версию, названия операций, типы и коды ошибок. Содержимое хранилища и сообщения исключений не записываются. Запись PreviousRunInterrupted при следующем запуске означает незавершённый предыдущий сеанс; это также возможно после отключения питания или принудительного завершения. Нативные аварии дополнительно попадают в журнал приложений Windows.\n\nГДЕ ДАННЫЕ?\n\n%LocalAppData%\\SecretManager\\vault.db. Удаление программы сохраняет хранилище. Приложение работает локально и не отправляет ваши секреты в сеть. Почтового входа нет."
+            Text = "БЫСТРЫЙ СТАРТ\n\n1. Создайте мастер-пароль от 12 символов. Сохраните его в надёжном месте.\n2. Нажмите «Новая ассоциация»: например, GitHub или почта.\n3. Раскройте карточку → «Добавить поле». Полей может быть сколько угодно: логин, пароль, PublicKey, заметка, изображение или файл. В зоне вложения можно перетащить один файл. Для картинки или файла доступны «Вставить из буфера» и Ctrl+V во всей форме. При вставке вложения тип выбирается автоматически; обычный текст вставляется в активное текстовое поле.\n4. Нажмите значение или кнопку копирования. Картинка одновременно копируется и открывается крупно.\n5. В меню слева → «Экспорт»: выберите ассоциации и поля, задайте отдельный пароль от 8 символов и сохраните зашифрованный .smvault. На другом компьютере создайте локальное хранилище → «Импорт». После ввода пароля можно выбрать только нужные ассоциации и поля.\n\nПОИСК\n\nИщет только названия, без учёта регистра. Можно вводить начало слова или несколько слов. Достаточно совпадения любого из них: «Почта Mail» найдёт и «Почта 1», и «Mail». Кириллица поддерживается. В настройках можно включить раскрытие только одной карточки. Значения полей в поиск не попадают.\n\nКАК ЗАЩИЩЕНЫ ДАННЫЕ?\n\nSQLite содержит зашифрованные названия, описания, значения и вложения. Файлы сначала преобразуются в base64, затем шифруются. Base64 не является защитой. Экспорт проверяется по SHA-256, затем по тегу AES-GCM: пересчёт хешсуммы не позволяет подменить данные.\n\nЧТО ДЕЛАЕТ ИМПОРТ?\n\nОбъединяет ассоциации. При совпадении идентификатора или названия предложит оставить локальную, заменить её или сохранить обе. До разрешения всех конфликтов база не меняется. В частичном переносе «Обновить выбранные поля» сохраняет остальные локальные поля. Поля сопоставляются по идентификатору; разные поля с одинаковым описанием не перезаписываются автоматически. Частичные копии требуют SecretManager 0.1.5 или новее; старые версии откажутся открывать их. Полные копии прежних версий поддерживаются. Настройки внешнего вида и блокировки устройства сохраняются локальными.\n\nЗАБЫЛ МАСТЕР-ПАРОЛЬ\n\nВосстановления нет. Создайте хранилище на другом устройстве и импортируйте резервную копию с известным паролем экспорта. Регулярно делайте резервные копии.\n\nБЛОКИРОВКА И ТРЕЙ\n\nCtrl+L блокирует сразу, Ctrl+F переводит фокус в поиск. По умолчанию окно блокируется после 5 минут без фокуса. Крестик скрывает окно в трей и блокирует сразу. Кнопка «Выйти» в левом меню завершает приложение полностью; верхний замок и Ctrl+L только блокируют. Значок: жёлтый замок — заблокировано, зелёный — открыто. Левый клик возвращает окно; правый клик → «Выйти» завершает процесс. Таймеры и поведение крестика настраиваются, 0 отключает таймер. Блокировка Windows также блокирует хранилище.\n\nБУФЕР И ФАЙЛЫ\n\nБуфер очищается через 30 секунд, только если в нём остались наши данные. История и облачный буфер Windows отключены для этих копирований. При блокировке данные приложения в буфере очищаются. Другие программы могут успеть прочитать буфер раньше. Для копирования произвольного файла создаётся временный файл в LocalAppData, который удаляется при очистке. Вложение: до 10 МБ, снимок: до 64 МБ. Предпросмотр: PNG/JPEG до 40 Мп. Для выбора файла используется настольный диалог с резервным стандартным диалогом. При запуске от администратора Windows ограничивает drag-and-drop: используйте кнопку или перезапустите приложение без повышенных прав.\n\nТЕМЫ И АНИМАЦИИ\n\nНастройки справа: системная, светлая, тёмная, полночь, лесная или собственная тема. Собственная тема позволяет выбрать фон и акцент. Шрифт, размер 10–26 пунктов, скругления и плотность доступны во всех темах. Размер задаётся ползунком; доступен Comic Sans MS. Изменения оформления видны сразу; «Сохранить настройки» закрепляет их. Закрытие панели отменяет несохранённый предпросмотр. Декоративные анимации: выключены, умеренные, максимальные. Скорость регулируется у подсветки и пружинного отклика при наведении и нажатии. Раскрытие и сворачивание карточек, появление содержимого и стандартные состояния элементов имеют постоянный темп. Системное отключение движения имеет приоритет.\n\nЖУРНАЛ ОШИБОК\n\nНастройки → «Открыть папку журналов». Файлы application.log и application.previous.log содержат время UTC, версию, названия операций, типы и коды ошибок. Содержимое хранилища и сообщения исключений не записываются. Запись PreviousRunInterrupted при следующем запуске означает незавершённый предыдущий сеанс; это также возможно после отключения питания или принудительного завершения. Нативные аварии дополнительно попадают в журнал приложений Windows.\n\nАВТОЗАПУСК И ОБНОВЛЕНИЯ\n\nВ настройках можно включить запуск при входе в Windows. Приложение запускается заблокированным в трее; открывается по значку замка. Автообновление включено по умолчанию для установленной программы: при запуске проверяется версия в GitHub Releases и загружается новый установщик. SHA-256 и версия файла проверяются до запуска. Установка ждёт блокировки хранилища и завершения текущего процесса, затем приложение запускается снова. Можно установить готовое обновление кнопкой или отключить автообновление. Без сети приложение продолжает работать. Для ручной проверки есть кнопка в настройках. Из сборки для разработки автоустановка не выполняется. Ошибка установки записывается в Updates внутри папки данных, в update-result.txt.\n\nГДЕ ДАННЫЕ?\n\n%LocalAppData%\\SecretManager\\vault.db. Удаление программы сохраняет хранилище. Приложение работает локально и не отправляет ваши секреты в сеть. Почтового входа нет."
         };
-        var dialog = Dialog("Инструкция и FAQ", new ScrollViewer { Content = text, MaxHeight = 580 });
+        var dialog = Dialog("FAQ", new ScrollViewer { Content = text, MaxHeight = 580 });
         dialog.Resources["ContentDialogMaxWidth"] = 720d;
         await ShowDialog(dialog);
     });
@@ -574,6 +584,7 @@ public sealed partial class MainWindow : Window
     private void Window_Closed(object sender, WindowEventArgs args)
     {
         exiting = true;
+        updateCancellation.Cancel(); updateClient?.Dispose();
         timer.Stop(); SystemEvents.SessionSwitch -= SystemEvents_SessionSwitch;
         ViewModel.SessionChanged -= UpdateSession; ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         activeDialog?.Hide(); ViewModel.Lock(); ViewModel.Dispose();
