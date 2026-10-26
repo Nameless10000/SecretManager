@@ -15,7 +15,7 @@ public static class VaultMerge
         {
             Incoming = incoming,
             Existing = FindMatch(local.Associations, incoming)
-        }).Where(x => x.Existing is not null && !Equivalent(x.Existing, x.Incoming))
+        }).Where(x => x.Existing is not null && !Equivalent(x.Existing, Candidate(x.Existing, x.Incoming, imported.IsPartial)))
             .Select(x => new ImportConflict(x.Existing!, x.Incoming)).ToArray();
     }
 
@@ -29,7 +29,8 @@ public static class VaultMerge
         {
             var existing = FindMatch(result, incoming);
             if (existing is null) { result.Add(ReidentifyFieldCollisions(incoming, result)); continue; }
-            if (Equivalent(existing, incoming)) continue;
+            var candidate = Candidate(existing, incoming, imported.IsPartial);
+            if (Equivalent(existing, candidate)) continue;
             if (!resolutions.TryGetValue(incoming.Id, out var choice))
                 throw new InvalidOperationException("Нужно разрешить все конфликты импорта.");
             switch (choice)
@@ -37,7 +38,7 @@ public static class VaultMerge
                 case ConflictResolution.KeepLocal: break;
                 case ConflictResolution.UseImported:
                     result.Remove(existing);
-                    result.Add(ReidentifyFieldCollisions(incoming with { Id = existing.Id }, result));
+                    result.Add(ReidentifyFieldCollisions(candidate with { Id = existing.Id }, result));
                     break;
                 case ConflictResolution.KeepBoth:
                     var baseTitle = incoming.Title[..Math.Min(incoming.Title.Length, 170)];
@@ -63,6 +64,19 @@ public static class VaultMerge
     private static SecretAssociation? FindMatch(IEnumerable<SecretAssociation> values, SecretAssociation incoming) =>
         values.FirstOrDefault(a => a.Id == incoming.Id) ??
         values.FirstOrDefault(a => string.Equals(a.Title.Trim(), incoming.Title.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static SecretAssociation Candidate(SecretAssociation local, SecretAssociation incoming, bool partial)
+    {
+        if (!partial) return incoming;
+        var fields = local.Fields.ToList();
+        foreach (var field in incoming.Fields)
+        {
+            var index = fields.FindIndex(f => f.Id == field.Id);
+            if (index < 0) fields.Add(field);
+            else fields[index] = field;
+        }
+        return incoming with { Fields = fields };
+    }
 
     private static bool Equivalent(SecretAssociation a, SecretAssociation b) => a.Title == b.Title &&
         JsonSerializer.Serialize(a.Fields, VaultValidation.JsonOptions) == JsonSerializer.Serialize(b.Fields, VaultValidation.JsonOptions);

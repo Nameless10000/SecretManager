@@ -53,11 +53,11 @@ public static class VaultValidation
             document.Settings.ClipboardClearSeconds is < 0 or > 300 ||
             !Enum.IsDefined(document.Settings.AnimationLevel) ||
             !double.IsFinite(document.Settings.MotionSpeed) || document.Settings.MotionSpeed is < 0.5 or > 2 ||
-            !double.IsFinite(document.Settings.FontSize) || document.Settings.FontSize is < 12 or > 20 ||
+            !double.IsFinite(document.Settings.FontSize) || document.Settings.FontSize is < 10 or > 26 ||
             !double.IsFinite(document.Settings.CornerRadius) || document.Settings.CornerRadius is < 0 or > 28 ||
             !System.Text.RegularExpressions.Regex.IsMatch(document.Settings.AccentColor ?? "", "^#[0-9A-Fa-f]{6}$") ||
             !System.Text.RegularExpressions.Regex.IsMatch(document.Settings.BackgroundColor ?? "", "^#[0-9A-Fa-f]{6}$") ||
-            !new[] { "Segoe UI Variable", "Segoe UI", "Arial", "Calibri", "Consolas" }.Contains(document.Settings.FontFamily))
+            !new[] { "Segoe UI Variable", "Segoe UI", "Arial", "Calibri", "Consolas", "Comic Sans MS" }.Contains(document.Settings.FontFamily))
             throw new InvalidDataException("Некорректные настройки.");
     }
 

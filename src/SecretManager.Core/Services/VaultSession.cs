@@ -99,11 +99,12 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
         }
     }
 
-    public string Export(string password)
+    public string Export(string password, IReadOnlyDictionary<Guid, IReadOnlySet<Guid>>? selection = null)
     {
         lock (sync)
         {
-            var value = VaultCrypto.Protect(Document, password, VaultCrypto.ExportContext);
+            var selected = selection is null ? Document : VaultSelection.Select(Document, selection);
+            var value = VaultCrypto.Protect(selected, password, VaultCrypto.ExportContext);
             try { return ExportPackage.Create(value.Envelope); }
             finally { CryptographicOperations.ZeroMemory(value.Key); }
         }

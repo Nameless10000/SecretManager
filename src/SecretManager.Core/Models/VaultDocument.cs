@@ -43,6 +43,8 @@ public sealed record AppSettings
 public sealed record VaultDocument
 {
     public int SchemaVersion { get; init; } = 1;
+    // A selected transfer is a patch: omitted fields must survive import.
+    public bool IsPartial { get; init; }
     public List<SecretAssociation> Associations { get; init; } = [];
     public AppSettings Settings { get; init; } = new();
 }

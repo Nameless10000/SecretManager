@@ -131,7 +131,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
     public Task ChangePasswordAsync(string oldPassword, string newPassword) => Task.Run(() => session.ChangePassword(oldPassword, newPassword));
-    public Task<string> ExportAsync(string password) => Task.Run(() => session.Export(password));
+    public VaultDocument TransferDocument => session.Document;
+    public Task<string> ExportAsync(string password, IReadOnlyDictionary<Guid, IReadOnlySet<Guid>>? selection = null) =>
+        Task.Run(() => session.Export(password, selection));
     public IReadOnlyList<ImportConflict> FindConflicts(VaultDocument imported) => VaultMerge.FindConflicts(session.Document, imported);
     public void Import(VaultDocument imported, IReadOnlyDictionary<Guid, ConflictResolution> choices)
     { session.Save(VaultMerge.Merge(session.Document, imported, choices)); Refresh(); }

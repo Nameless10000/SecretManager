@@ -20,12 +20,19 @@ public static class VaultCrypto
             throw new ArgumentException("Используйте пароль длиной от 12 до 1024 символов.");
     }
 
+    public static void ValidateExportPassword(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password) || password.Length is < 8 or > 1024)
+            throw new ArgumentException("Используйте пароль экспорта длиной от 8 до 1024 символов.");
+    }
+
     public static byte[] DeriveKey(string password, byte[] salt) =>
         Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, 32);
 
     public static (EncryptedEnvelope Envelope, byte[] Key) Protect(VaultDocument document, string password, string context)
     {
-        ValidateNewPassword(password);
+        if (context == ExportContext) ValidateExportPassword(password);
+        else ValidateNewPassword(password);
         var salt = RandomNumberGenerator.GetBytes(32);
         var key = DeriveKey(password, salt);
         try { return (Encrypt(document, key, salt, context), key); }
