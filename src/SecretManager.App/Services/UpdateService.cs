@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -31,7 +32,7 @@ internal sealed class UpdateService(HttpClient client)
 
     internal async Task<UpdateCheckResult> CheckAsync(Version current, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, ManifestUri);
+        using var request = FreshRequest(ManifestUri);
         using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (response.StatusCode == HttpStatusCode.NotFound) return new(UpdateCheckStatus.NotPublished);
         response.EnsureSuccessStatusCode();
@@ -79,6 +80,20 @@ internal sealed class UpdateService(HttpClient client)
             throw new InvalidDataException("Недопустимое перенаправление загрузки.");
     }
 
+    private static HttpRequestMessage FreshRequest(Uri endpoint)
+    {
+        // A rolling release replaces assets at the same public URL. A proxy can
+        // otherwise return an older, valid manifest and report a false "up to date".
+        var target = new UriBuilder(endpoint);
+        var query = target.Query.TrimStart('?');
+        target.Query = (query.Length == 0 ? "" : query + "&") + "check=" + Guid.NewGuid().ToString("N");
+        var request = new HttpRequestMessage(HttpMethod.Get, target.Uri);
+        request.Headers.CacheControl = new CacheControlHeaderValue
+        { NoCache = true, NoStore = true, MaxAge = TimeSpan.Zero };
+        request.Headers.Pragma.Add(new NameValueHeaderValue("no-cache"));
+        return request;
+    }
+
     internal async Task<PreparedUpdate> DownloadAsync(UpdateRelease release, string folder, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -94,7 +109,8 @@ internal sealed class UpdateService(HttpClient client)
         }
         try
         {
-            using var response = await client.GetAsync(release.Download, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+            using var request = FreshRequest(release.Download);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
             response.EnsureSuccessStatusCode();
             ValidateDownloadResponse(response);
             if (response.Content.Headers.ContentLength is long length && length != release.Size)

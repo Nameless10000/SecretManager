@@ -99,7 +99,12 @@ public sealed class UpdateTests : IDisposable
         using var http = new HttpClient(new Handler(request =>
         {
             requests.Add(request.RequestUri!);
-            Assert.Equal(UpdateService.ManifestUri, request.RequestUri);
+            Assert.Equal(UpdateService.ManifestUri.GetLeftPart(UriPartial.Path), request.RequestUri!.GetLeftPart(UriPartial.Path));
+            Assert.StartsWith("?check=", request.RequestUri.Query);
+            Assert.True(request.Headers.CacheControl?.NoCache);
+            Assert.True(request.Headers.CacheControl?.NoStore);
+            Assert.Equal(TimeSpan.Zero, request.Headers.CacheControl?.MaxAge);
+            Assert.Contains(request.Headers.Pragma, header => header.Name == "no-cache");
             return new(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent(Manifest()) };
         }));
         var result = await new UpdateService(http).CheckAsync(new(0, 1, 4), default);
@@ -110,12 +115,54 @@ public sealed class UpdateTests : IDisposable
     }
 
     [Fact]
+    public async Task RepeatedChecksDoNotReuseTheCachedManifestOfThePreviousRollingRelease()
+    {
+        var cached = new Dictionary<Uri, string>
+        { [UpdateService.ManifestUri] = Manifest("0.1.7") };
+        var requests = new List<Uri>();
+        using var http = new HttpClient(new Handler(request =>
+        {
+            var uri = request.RequestUri!;
+            requests.Add(uri);
+            if (!cached.TryGetValue(uri, out var content))
+                cached[uri] = content = Manifest("0.2.0");
+            return new(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent(content) };
+        }));
+        var updater = new UpdateService(http);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var result = await updater.CheckAsync(new(0, 1, 7), default);
+            Assert.Equal(UpdateCheckStatus.Available, result.Status);
+            Assert.Equal(new Version(0, 2, 0), result.Release!.Version);
+        }
+        Assert.Equal(2, requests.Distinct().Count());
+        Assert.DoesNotContain(UpdateService.ManifestUri, requests);
+    }
+
+    [Fact]
+    public async Task InstallerDownloadAlsoRequestsFreshContentFromTheRollingRelease()
+    {
+        byte[] bytes = [1, 2, 3, 4, 5];
+        var release = UpdateService.ParseManifest(Manifest(digest: Convert.ToHexString(SHA256.HashData(bytes))), new(0, 1, 4)).Release!;
+        using var http = new HttpClient(new Handler(request =>
+        {
+            Assert.Equal(release.Download.GetLeftPart(UriPartial.Path), request.RequestUri!.GetLeftPart(UriPartial.Path));
+            Assert.StartsWith("?check=", request.RequestUri.Query);
+            Assert.True(request.Headers.CacheControl?.NoCache);
+            Assert.True(request.Headers.CacheControl?.NoStore);
+            return new(HttpStatusCode.OK) { RequestMessage = request, Content = new ByteArrayContent(bytes) };
+        }));
+        var candidate = await new UpdateService(http).DownloadAsync(release, folder, default);
+        Assert.Equal(bytes, await File.ReadAllBytesAsync(candidate.Installer));
+    }
+
+    [Fact]
     public async Task LegacyReleaseDoesNotMasqueradeAsUpToDateOrFallBackToTheApi()
     {
         var requests = 0;
         using var http = new HttpClient(new Handler(request =>
         {
-            requests++; Assert.Equal(UpdateService.ManifestUri, request.RequestUri);
+            requests++; Assert.Equal(UpdateService.ManifestUri.GetLeftPart(UriPartial.Path), request.RequestUri!.GetLeftPart(UriPartial.Path));
             return new(HttpStatusCode.OK) { RequestMessage = request, Content = new StringContent(new string('a', 64) + "  SecretManager-Setup.exe\n") };
         }));
         var result = await new UpdateService(http).CheckAsync(new(0, 1, 4), default);
