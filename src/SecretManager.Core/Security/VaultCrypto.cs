@@ -43,10 +43,7 @@ public static class VaultCrypto
         var plaintext = JsonSerializer.SerializeToUtf8Bytes(document, VaultValidation.JsonOptions);
         try
         {
-            if (plaintext.Length > (long)document.Settings.MaxStorageMegabytes * 1024 * 1024)
-            {
-                throw new InvalidDataException($"Содержимое превышает лимит {document.Settings.MaxStorageMegabytes} МБ. Увеличьте лимит в настройках или уменьшите объём данных.");
-            }
+            VaultValidation.ValidateDocumentSize(plaintext.Length, document.Settings.MaxStorageMegabytes);
             var nonce = RandomNumberGenerator.GetBytes(12);
             var tag = new byte[16];
             var ciphertext = new byte[plaintext.Length];
@@ -75,10 +72,7 @@ public static class VaultCrypto
                 var document = JsonSerializer.Deserialize<VaultDocument>(plain, VaultValidation.JsonOptions)
                     ?? throw new InvalidDataException("Пустое хранилище.");
                 VaultValidation.Validate(document);
-                if (plain.Length > (long)document.Settings.MaxStorageMegabytes * 1024 * 1024)
-                {
-                    throw new InvalidDataException("Содержимое превышает установленный лимит хранилища.");
-                }
+                VaultValidation.ValidateDocumentSize(plain.Length, document.Settings.MaxStorageMegabytes);
                 return (document, key);
             }
             finally { CryptographicOperations.ZeroMemory(plain); }

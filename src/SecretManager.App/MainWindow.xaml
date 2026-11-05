@@ -147,10 +147,14 @@
       <Slider x:Name="MotionSpeedChoice" Minimum="0.5" Maximum="2" StepFrequency="0.1" ValueChanged="AppearanceSlider_Changed"/>
       <TextBlock Text="Раскрытие карточек и появление содержимого имеют постоянную скорость. Ползунок меняет плавность подсветки и пружинного отклика." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}" TextWrapping="Wrap"/>
       <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" Margin="0,6"/>
+      <Button Content="Инструменты: шаблоны, история, резервные копии" Click="Tools_Click" HorizontalAlignment="Stretch"/>
+      <TextBlock Text="Быстрый доступ из любой программы: Ctrl+Alt+S" TextWrapping="Wrap" FontSize="11"/>
       <TextBlock Text="Безопасность и вход" FontSize="16" FontWeight="SemiBold"/>
       <Button Content="Сменить мастер-пароль" Click="ChangePassword_Click" HorizontalAlignment="Stretch"/>
       <NumberBox x:Name="LockMinutesChoice" Header="Блокировка без фокуса, минут" Minimum="0" Maximum="120" SmallChange="1" SpinButtonPlacementMode="Compact"/>
       <NumberBox x:Name="ClipboardSecondsChoice" Header="Очистка буфера, секунд" Minimum="0" Maximum="300" SmallChange="5" SpinButtonPlacementMode="Compact"/>
+      <NumberBox x:Name="StorageLimitChoice" Header="Лимит содержимого хранилища, МБ" Minimum="16" Maximum="512" SmallChange="16" SpinButtonPlacementMode="Compact"/>
+      <TextBlock Text="По умолчанию 64 МБ. Служебное кодирование увеличивает размер файла на диске. Резервные копии в лимит не входят. Большие хранилища требуют больше оперативной памяти; вложение — до 10 МБ." FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
       <TextBlock Text="0 отключает соответствующий таймер." FontSize="11" Foreground="{ThemeResource VaultSecondaryTextBrush}"/>
       <ToggleSwitch x:Name="TrayChoice" Header="Закрытие крестиком — в трей"/>
       <ToggleSwitch x:Name="LockHiddenChoice" Header="Сразу блокировать при уходе в трей"/>

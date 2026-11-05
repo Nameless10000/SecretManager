@@ -53,6 +53,25 @@ public sealed class StorageLimitTests : IDisposable
         Assert.Equal(512, session.Document.Settings.MaxStorageMegabytes);
     }
 
+    [Theory]
+    [InlineData(16, 16777216, true)]
+    [InlineData(16, 16777217, false)]
+    [InlineData(64, 67108864, true)]
+    [InlineData(64, 67108865, false)]
+    [InlineData(512, 536870912, true)]
+    [InlineData(512, 536870913, false)]
+    public void SerializedByteBoundaryIsExactWithoutAllocatingTheWholeQuota(int megabytes, int bytes, bool valid)
+    {
+        if (valid)
+        {
+            VaultValidation.ValidateDocumentSize(bytes, megabytes);
+        }
+        else
+        {
+            Assert.Throws<InvalidDataException>(() => VaultValidation.ValidateDocumentSize(bytes, megabytes));
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(folder))

@@ -1,10 +1,14 @@
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Runtime.InteropServices;
 using Windows.Graphics.Imaging;
 
 namespace SecretManager.ThemeChecks;
 
 internal static class UsageChecks
 {
+    [DllImport("user32.dll")]
+    private static extern bool EnableWindow(nint window, bool enabled);
+
     internal static async Task<int> RunAsync(string output)
     {
         var previous = Environment.GetEnvironmentVariable("SECRETMANAGER_DATA_DIR");
@@ -22,7 +26,11 @@ internal static class UsageChecks
         SecretManager.App.MainWindow? window = null;
         try
         {
-            window = new SecretManager.App.MainWindow { Title = "SecretManager — usage checks (synthetic data)" }; window.Activate();
+            window = new SecretManager.App.MainWindow { Title = "SecretManager — usage checks (synthetic data)" };
+            // Keep physical desktop input out of the synthetic profile. XAML automation
+            // peers still invoke the real controls and handlers on the dispatcher.
+            EnableWindow(WinRT.Interop.WindowNative.GetWindowHandle(window), false);
+            window.Activate();
             return await window.RunUsageScenarios(output, name => File.WriteAllText(Path.Combine(output, "usage-stage.txt"), name));
         }
         finally

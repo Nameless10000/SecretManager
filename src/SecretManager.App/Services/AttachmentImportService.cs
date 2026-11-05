@@ -40,7 +40,7 @@ public sealed class AttachmentImportService
         {
             var reference = await data.GetBitmapAsync(); using var source = await reference.OpenReadAsync();
             using var input = source.AsStreamForRead();
-            var bytes = await AttachmentContent.ReadBoundedAsync(input, VaultValidation.MaxDocumentBytes);
+            var bytes = await AttachmentContent.ReadBoundedAsync(input, 64 * 1024 * 1024);
             try
             {
                 using var encoded = await InMemoryAsync(bytes);

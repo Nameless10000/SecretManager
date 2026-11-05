@@ -8,6 +8,19 @@ public static class VaultValidation
     public const int MaxDocumentBytes = 512 * 1024 * 1024;
     public static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = false };
 
+    public static void ValidateDocumentSize(int byteCount, int limitMegabytes)
+    {
+        if (limitMegabytes is < 16 or > 512 || byteCount < 0)
+        {
+            throw new InvalidDataException("Допустимый лимит хранилища: 16–512 МБ.");
+        }
+
+        if (byteCount > (long)limitMegabytes * 1024 * 1024)
+        {
+            throw new InvalidDataException($"Содержимое превышает лимит {limitMegabytes} МБ. Увеличьте лимит в настройках или уменьшите объём данных.");
+        }
+    }
+
     public static void Validate(VaultDocument document)
     {
         if (document.SchemaVersion is not (1 or 2 or 3) || document.SchemaVersion == 2 && !document.IsPartial ||

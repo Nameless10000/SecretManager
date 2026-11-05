@@ -22,6 +22,8 @@ namespace SecretManager.App;
 public sealed partial class MainWindow : Window
 {
     public MainViewModel ViewModel { get; }
+    private GlobalHotkey? globalHotkey;
+    private DateTimeOffset nextMaintenance;
     private readonly ClipboardService clipboard;
     private readonly MotionService motion;
     private readonly TrayService tray;
@@ -74,6 +76,83 @@ public sealed partial class MainWindow : Window
         findKey.Invoked += (_, e) => { if (ViewModel.IsUnlocked) SearchBox.Focus(FocusState.Programmatic); e.Handled = true; };
         Root.KeyboardAccelerators.Add(findKey);
         ConfigureLogin();
+        if (Environment.GetEnvironmentVariable("SECRETMANAGER_DATA_DIR") is null)
+        {
+            globalHotkey = new GlobalHotkey();
+            globalHotkey.Invoked += GlobalQuickAccess;
+        }
+
+        timer.Tick += MaintenanceTick;
+    }
+
+    private async void Tools_Click(object sender, RoutedEventArgs args)
+    {
+        await Run(async () =>
+        {
+            var captured = epoch;
+            RequireSession(captured);
+            using var panel = new VaultToolsPanel(ViewModel, () => ViewModel.IsUnlocked && epoch == captured && !exiting);
+            panel.CopyRequested += CopyToolField;
+            await ShowDialog(Dialog("Инструменты хранилища", panel));
+        });
+    }
+
+    private async void CopyToolField(SecretField field)
+    {
+        try
+        {
+            await CopyField(new FieldViewModel(field));
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception error) when (error is InvalidOperationException or System.Runtime.InteropServices.COMException or IOException or UnauthorizedAccessException)
+        {
+            if (!exiting && ViewModel.IsUnlocked)
+            {
+                Notify("Не удалось скопировать значение. Повторите попытку.", true);
+            }
+        }
+    }
+
+    private async void GlobalQuickAccess()
+    {
+        ShowWindow();
+        if (!ViewModel.IsUnlocked || activeDialog is not null)
+        {
+            return;
+        }
+
+        await Run(async () =>
+        {
+            var captured = epoch;
+            using var panel = new QuickAccessPanel(ViewModel, () => ViewModel.IsUnlocked && captured == epoch && !exiting);
+            panel.CopyRequested += CopyToolField;
+            await ShowDialog(Dialog("Быстрый доступ · Ctrl+Alt+S", panel));
+        });
+    }
+
+    private void MaintenanceTick(object? sender, object args)
+    {
+        if (exiting || !ViewModel.IsUnlocked || DateTimeOffset.UtcNow < nextMaintenance)
+        {
+            return;
+        }
+
+        nextMaintenance = DateTimeOffset.UtcNow.AddMinutes(30);
+        try
+        {
+            ViewModel.Backup();
+            var due = SecretManager.Core.Services.VaultInsights.Due(ViewModel.TransferDocument, DateTimeOffset.UtcNow);
+            if (due.Count > 0)
+            {
+                Notify($"Срок действия истёк или истекает в течение 7 дней: {due.Count}. Подробности — в инструментах.");
+            }
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            Notify("Не удалось создать резервную копию. Проверьте доступ к папке.", true);
+        }
     }
 
     private void ConfigureLogin()
@@ -210,7 +289,7 @@ public sealed partial class MainWindow : Window
     }
     private async void DeleteAssociation_Click(object sender, RoutedEventArgs e) => await Run(async () =>
     {
-        if ((sender as Button)?.Tag is AssociationViewModel topic && await Confirm("Удалить ассоциацию?", $"«{topic.Title}» и все её поля будут удалены. Это действие нельзя отменить."))
+        if ((sender as Button)?.Tag is AssociationViewModel topic && await Confirm("Удалить ассоциацию?", $"«{topic.Title}» и все её поля будут удалены. Восстановление доступно через историю и корзину в инструментах."))
         { ViewModel.DeleteAssociation(topic.Model.Id); Notify("Ассоциация удалена"); }
     });
 
@@ -253,26 +332,26 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or InvalidOperationException)
             { error.Text = ex.Message; }
         };
-        async Task SwitchKind()
-        {
-            text.Visibility = kind.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
-            secret.Visibility = kind.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
-            attachment.Visibility = kind.SelectedIndex >= 2 ? Visibility.Visible : Visibility.Collapsed;
-            await attachment.SetImageModeAsync(kind.SelectedIndex == 2);
-        }
-        kind.SelectionChanged += async (_, _) => await SwitchKind();
+        kind.SelectionChanged += async (_, _) => await SwitchFieldKind(kind, text, secret, attachment);
         panel.Children.Add(description); panel.Children.Add(kind); panel.Children.Add(text); panel.Children.Add(secret);
         panel.Children.Add(attachment); panel.Children.Add(error);
+        var generate = new Button { Content = "Создать случайный пароль (24 символа)" };
+        generate.Click += (_, _) =>
+        {
+            secret.Password = SecretManager.Core.Services.PasswordGenerator.Generate();
+            kind.SelectedIndex = 1;
+        };
+        panel.Children.Add(generate);
         kind.SelectedIndex = (int)(existing?.Kind ?? FieldKind.Secret);
         if (existing?.Kind == FieldKind.Text) text.Text = existing.Value;
         if (existing?.Kind == FieldKind.Secret) secret.Password = existing.Value;
-        await SwitchKind();
+        await SwitchFieldKind(kind, text, secret, attachment);
         if (existing?.Kind is FieldKind.Image or FieldKind.File) await attachment.SetExistingAsync(existing);
         RequireSession(captured);
         var dialog = Dialog(existing is null ? "Добавить поле" : "Редактирование поля", panel, "Сохранить");
         attachment.StateChanged += () => dialog.IsPrimaryButtonEnabled = !attachment.IsBusy;
         using var pasteShortcut = new AttachmentPasteHandler(dialog, attachment, async images =>
-        { kind.SelectedIndex = images ? 2 : 3; await SwitchKind(); },
+        { kind.SelectedIndex = images ? 2 : 3; await SwitchFieldKind(kind, text, secret, attachment); },
             () => ViewModel.IsUnlocked && captured == epoch, message => error.Text = message);
         attachment.PasteRequested += async () => await pasteShortcut.PasteFromClipboardAsync();
         SecretField? saved = null;
@@ -300,6 +379,14 @@ public sealed partial class MainWindow : Window
             { ViewModel.SaveField(topicId, saved); Notify("Поле сохранено"); }
         }
         finally { text.Text = ""; secret.Password = ""; saved = null; }
+    }
+
+    private static async Task SwitchFieldKind(ComboBox kind, TextBox text, PasswordBox secret, AttachmentInput attachment)
+    {
+        text.Visibility = kind.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+        secret.Visibility = kind.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+        attachment.Visibility = kind.SelectedIndex >= 2 ? Visibility.Visible : Visibility.Collapsed;
+        await attachment.SetImageModeAsync(kind.SelectedIndex == 2);
     }
 
     private async void Copy_Click(object sender, RoutedEventArgs e) => await Run(async () =>
@@ -414,6 +501,7 @@ public sealed partial class MainWindow : Window
         SingleExpandedChoice.IsOn = s.SingleExpandedAssociation;
         AnimationChoice.SelectedIndex = (int)s.AnimationLevel; MotionSpeedChoice.Value = s.MotionSpeed;
         LockMinutesChoice.Value = s.AutoLockMinutes; ClipboardSecondsChoice.Value = s.ClipboardClearSeconds;
+        StorageLimitChoice.Value = s.MaxStorageMegabytes;
         TrayChoice.IsOn = s.CloseToTray; LockHiddenChoice.IsOn = s.LockWhenHidden;
         StartupChoice.IsOn = startupRegistration.Enabled;
         AutoUpdateChoice.IsOn = DevicePreferences.Load(AppPaths.DataDirectory).AutomaticUpdates;
@@ -429,6 +517,7 @@ public sealed partial class MainWindow : Window
         AccentColor = accent, BackgroundColor = background,
         AutoLockMinutes = double.IsFinite(LockMinutesChoice.Value) ? (int)LockMinutesChoice.Value : 5,
         ClipboardClearSeconds = double.IsFinite(ClipboardSecondsChoice.Value) ? (int)ClipboardSecondsChoice.Value : 30,
+        MaxStorageMegabytes = double.IsFinite(StorageLimitChoice.Value) ? (int)StorageLimitChoice.Value : 64,
         CloseToTray = TrayChoice.IsOn, LockWhenHidden = LockHiddenChoice.IsOn
     };
     private void ApplyAppearance()
@@ -584,6 +673,8 @@ public sealed partial class MainWindow : Window
     }
     private void Window_Closed(object sender, WindowEventArgs args)
     {
+        globalHotkey?.Dispose();
+        timer.Tick -= MaintenanceTick;
         exiting = true;
         updateCancellation.Cancel(); updateClient?.Dispose();
         updateNoticeTimer.Stop(); updateNoticeTimer.Tick -= DismissUpdateNotice;
