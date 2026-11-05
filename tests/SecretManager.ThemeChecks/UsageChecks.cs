@@ -9,6 +9,11 @@ internal static class UsageChecks
     [DllImport("user32.dll")]
     private static extern bool EnableWindow(nint window, bool enabled);
 
+    internal static void SuppressPhysicalInput(Microsoft.UI.Xaml.Window window)
+    {
+        EnableWindow(WinRT.Interop.WindowNative.GetWindowHandle(window), false);
+    }
+
     internal static async Task<int> RunAsync(string output)
     {
         var previous = Environment.GetEnvironmentVariable("SECRETMANAGER_DATA_DIR");

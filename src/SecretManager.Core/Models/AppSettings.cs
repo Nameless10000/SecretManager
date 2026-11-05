@@ -2,6 +2,7 @@ namespace SecretManager.Core.Models;
 
 public sealed record AppSettings
 {
+    public PasswordGeneratorOptions PasswordGenerator { get; init; } = new();
     public int MaxStorageMegabytes { get; init; } = 64;
     public bool AutomaticBackups { get; init; } = true;
     public AppTheme Theme { get; init; } = AppTheme.System;

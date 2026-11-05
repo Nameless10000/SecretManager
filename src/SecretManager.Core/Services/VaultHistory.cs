@@ -26,7 +26,7 @@ public static class VaultHistory
             revisions.RemoveAt(revisions.Count - 1);
         }
 
-        return next with { SchemaVersion = 3, Revisions = revisions };
+        return next with { SchemaVersion = 4, Revisions = revisions };
     }
 
     public static VaultDocument Restore(VaultDocument document, Guid revisionId)

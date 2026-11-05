@@ -73,35 +73,48 @@ public sealed partial class MainWindow : Window
         lockKey.Invoked += (_, e) => { if (!exiting) ViewModel.Lock(); e.Handled = true; };
         Root.KeyboardAccelerators.Add(lockKey);
         var findKey = new KeyboardAccelerator { Key = VirtualKey.F, Modifiers = VirtualKeyModifiers.Control };
-        findKey.Invoked += (_, e) => { if (ViewModel.IsUnlocked) SearchBox.Focus(FocusState.Programmatic); e.Handled = true; };
+        findKey.Invoked += (_, e) =>
+        {
+            if (ViewModel.IsUnlocked && quickAccessWindow is null)
+            {
+                SearchBox.Focus(FocusState.Programmatic);
+            }
+
+            e.Handled = true;
+        };
         Root.KeyboardAccelerators.Add(findKey);
+        ShortcutSettings.Load(DevicePreferences.Load(AppPaths.DataDirectory).QuickAccess);
         ConfigureLogin();
         if (Environment.GetEnvironmentVariable("SECRETMANAGER_DATA_DIR") is null)
         {
-            globalHotkey = new GlobalHotkey();
-            globalHotkey.Invoked += GlobalQuickAccess;
+            var shortcut = DevicePreferences.Load(AppPaths.DataDirectory).QuickAccess;
+            if (shortcut.Enabled)
+            {
+                globalHotkey = new GlobalHotkey(shortcut.Key, shortcut.Modifiers);
+                if (!globalHotkey.Registered)
+                {
+                    ShortcutStatus.Text = "Сочетание занято. Выберите другое и нажмите «Применить сочетание».";
+                }
+            }
+            if (globalHotkey is not null)
+            {
+                globalHotkey.Invoked += GlobalQuickAccess;
+            }
         }
 
         timer.Tick += MaintenanceTick;
     }
 
-    private async void Tools_Click(object sender, RoutedEventArgs args)
+    private async void CopyQuickField(SecretField field)
     {
-        await Run(async () =>
-        {
-            var captured = epoch;
-            RequireSession(captured);
-            using var panel = new VaultToolsPanel(ViewModel, () => ViewModel.IsUnlocked && epoch == captured && !exiting);
-            panel.CopyRequested += CopyToolField;
-            await ShowDialog(Dialog("Инструменты хранилища", panel));
-        });
-    }
-
-    private async void CopyToolField(SecretField field)
-    {
+        var window = quickAccessWindow;
         try
         {
             await CopyField(new FieldViewModel(field));
+            if (window is not null && ReferenceEquals(window, quickAccessWindow))
+            {
+                window.Close();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -115,21 +128,127 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void GlobalQuickAccess()
+    private QuickAccessWindow? quickAccessWindow;
+
+    private void GlobalQuickAccess()
     {
-        ShowWindow();
-        if (!ViewModel.IsUnlocked || activeDialog is not null)
+        if (exiting)
         {
             return;
         }
 
+        CheckFocusTimeout();
+        if (quickAccessWindow is null)
+        {
+            quickAccessWindow = new QuickAccessWindow(ViewModel);
+            quickAccessWindow.CopyRequested += CopyQuickField;
+            quickAccessWindow.FocusChanged += QuickAccessFocusChanged;
+            quickAccessWindow.Closed += QuickAccessClosed;
+        }
+
+        quickAccessWindow.Activate();
+        quickAccessWindow.FocusInput();
+    }
+
+    private void QuickAccessClosed(object sender, WindowEventArgs args)
+    {
+        quickAccessWindow = null;
+    }
+
+    private void QuickAccessFocusChanged(bool focused)
+    {
+        focus.SetFocused(isFocused || focused, DateTimeOffset.UtcNow);
+    }
+
+    private void SettingsCategory_Expanding(Expander sender, ExpanderExpandingEventArgs args)
+    {
+        foreach (var category in SettingsSections.Children.OfType<Expander>())
+        {
+            if (!ReferenceEquals(category, sender))
+            {
+                category.IsExpanded = false;
+            }
+        }
+    }
+
+    private void Favorites_Click(object sender, RoutedEventArgs args)
+    {
+        if (ViewModel.IsUnlocked)
+        {
+            ViewModel.FavoritesOnly = !ViewModel.FavoritesOnly;
+            ViewModel.Refresh();
+        }
+    }
+
+    private async void GeneratorSettings_Click(object sender, RoutedEventArgs args)
+    {
         await Run(async () =>
         {
             var captured = epoch;
-            using var panel = new QuickAccessPanel(ViewModel, () => ViewModel.IsUnlocked && captured == epoch && !exiting);
-            panel.CopyRequested += CopyToolField;
-            await ShowDialog(Dialog("Быстрый доступ · Ctrl+Alt+S", panel));
+            RequireSession(captured);
+            var editor = new PasswordGeneratorSettingsControl();
+            editor.Load(ViewModel.Settings.PasswordGenerator);
+            var body = new StackPanel { Spacing = 12 };
+            body.Children.Add(editor);
+            var error = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            body.Children.Add(error);
+            var dialog = Dialog("Параметры генератора", body, "Сохранить");
+            dialog.PrimaryButtonClick += (_, click) =>
+            {
+                try
+                {
+                    RequireSession(captured);
+                    ViewModel.SaveSettings(ViewModel.Settings with { PasswordGenerator = editor.Capture() });
+                }
+                catch (Exception exception) when (exception is ArgumentException or IOException or InvalidDataException or OperationCanceledException)
+                {
+                    error.Text = exception.Message;
+                    click.Cancel = true;
+                }
+            };
+            await ShowDialog(dialog);
         });
+    }
+
+    private void SaveShortcut_Click(object sender, RoutedEventArgs args)
+    {
+        GlobalHotkey? candidate = null;
+        try
+        {
+            var gesture = ShortcutSettings.Capture();
+            var current = DevicePreferences.Load(AppPaths.DataDirectory);
+            var replace = gesture != current.QuickAccess || gesture.Enabled && globalHotkey?.Registered != true;
+            if (replace && gesture.Enabled && Environment.GetEnvironmentVariable("SECRETMANAGER_DATA_DIR") is null)
+            {
+                candidate = new GlobalHotkey(gesture.Key, gesture.Modifiers);
+                if (!candidate.Registered)
+                {
+                    throw new ArgumentException("Сочетание занято другой программой или зарезервировано Windows. Выберите другое.");
+                }
+            }
+
+            (current with { QuickAccess = gesture }).Save(AppPaths.DataDirectory);
+            if (replace)
+            {
+                globalHotkey?.Dispose();
+                globalHotkey = candidate;
+                candidate = null;
+                if (globalHotkey is not null)
+                {
+                    globalHotkey.Invoked += GlobalQuickAccess;
+                }
+            }
+
+            ShortcutStatus.Text = "Сочетание сохранено";
+        }
+        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            ShortcutStatus.Text = exception.Message;
+        }
+        finally
+        {
+            candidate?.Dispose();
+        }
     }
 
     private void MaintenanceTick(object? sender, object args)
@@ -146,7 +265,7 @@ public sealed partial class MainWindow : Window
             var due = SecretManager.Core.Services.VaultInsights.Due(ViewModel.TransferDocument, DateTimeOffset.UtcNow);
             if (due.Count > 0)
             {
-                Notify($"Срок действия истёк или истекает в течение 7 дней: {due.Count}. Подробности — в инструментах.");
+                Notify($"Срок действия истёк или истекает в течение 7 дней: {due.Count}. Срок указан рядом с полем; изменить его можно в редакторе поля.");
             }
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -180,6 +299,7 @@ public sealed partial class MainWindow : Window
             LoginPassword.Password = ""; LoginConfirmation.Password = "";
             LoginError.IsOpen = false;
             _ = clipboard.ClearOwnedAsync();
+            ShortcutSettings.Load(DevicePreferences.Load(AppPaths.DataDirectory).QuickAccess);
             ConfigureLogin();
             LoginPassword.Focus(FocusState.Programmatic);
             motion.Enter(LoginView);
@@ -188,7 +308,10 @@ public sealed partial class MainWindow : Window
         {
             LoginPassword.Password = ""; LoginConfirmation.Password = "";
             LoadSettings(); ApplyAppearance(); motion.Enter(VaultView);
-            SearchBox.Focus(FocusState.Programmatic);
+            if (quickAccessWindow is null)
+            {
+                SearchBox.Focus(FocusState.Programmatic);
+            }
         }
         UpdateEmptyState();
     }
@@ -280,16 +403,32 @@ public sealed partial class MainWindow : Window
     private async Task EditAssociation(SecretAssociation? existing)
     {
         var captured = epoch;
-        var title = new TextBox { Header = "Название сайта, приложения или темы", Text = existing?.Title ?? "", MaxLength = 200, MinWidth = 380 };
-        var result = await ShowDialog(Dialog(existing is null ? "Новая ассоциация" : "Название ассоциации", title, "Сохранить"));
         RequireSession(captured);
-        if (result != ContentDialogResult.Primary) return;
-        var value = (existing ?? new SecretAssociation()) with { Title = title.Text.Trim(), UpdatedAt = DateTimeOffset.UtcNow };
-        ViewModel.SaveAssociation(value); Notify(existing is null ? "Ассоциация создана. Теперь можно добавить поля." : "Название сохранено");
+        using var editor = new AssociationEditor(existing, ViewModel.TransferDocument);
+        var dialog = Dialog(existing is null ? "Новая ассоциация" : "Редактирование ассоциации", editor, "Сохранить");
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            try
+            {
+                RequireSession(captured);
+                ViewModel.SaveAssociation(editor.BuildValue());
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or IOException or InvalidDataException or OperationCanceledException)
+            {
+                editor.Error.Text = exception.Message;
+                args.Cancel = true;
+            }
+        };
+        var result = await ShowDialog(dialog);
+        RequireSession(captured);
+        if (result == ContentDialogResult.Primary)
+        {
+            Notify(existing is null ? "Ассоциация сохранена" : "Изменения сохранены");
+        }
     }
     private async void DeleteAssociation_Click(object sender, RoutedEventArgs e) => await Run(async () =>
     {
-        if ((sender as Button)?.Tag is AssociationViewModel topic && await Confirm("Удалить ассоциацию?", $"«{topic.Title}» и все её поля будут удалены. Восстановление доступно через историю и корзину в инструментах."))
+        if ((sender as Button)?.Tag is AssociationViewModel topic && await Confirm("Удалить ассоциацию?", $"«{topic.Title}» и все её поля будут удалены. Восстановление доступно в форме создания ассоциации."))
         { ViewModel.DeleteAssociation(topic.Model.Id); Notify("Ассоциация удалена"); }
     });
 
@@ -315,10 +454,35 @@ public sealed partial class MainWindow : Window
         foreach (var name in new[] { "Текст", "Секрет / пароль", "Изображение PNG / JPEG", "Любой файл" }) kind.Items.Add(name);
         var text = new TextBox { Header = "Значение", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 90, MaxHeight = 220, MaxLength = 1_000_000 };
         var secret = new PasswordBox { Header = "Значение секрета", MaxLength = 1_000_000, PasswordRevealMode = PasswordRevealMode.Peek };
+        var generator = new Button { Content = "Сгенерировать пароль" };
+        generator.Click += (_, _) => secret.Password = SecretManager.Core.Services.PasswordGenerator.Generate(ViewModel.Settings.PasswordGenerator);
+        var expires = new CalendarDatePicker { Header = "Срок действия поля (необязательно)", Date = existing?.ExpiresAt };
+        var clearExpiry = new Button { Content = "Без срока действия" };
+        clearExpiry.Click += (_, _) => expires.Date = null;
+        var audit = new TextBlock { TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
+        secret.PasswordChanged += (_, _) =>
+        {
+            if (ViewModel.IsUnlocked && captured == epoch && secret.Password.Length > 0)
+            {
+                var duplicates = ViewModel.TransferDocument.Associations.SelectMany(topic => topic.Fields)
+                    .Count(field => field.Id != existing?.Id && field.Kind == FieldKind.Secret && field.Value == secret.Password);
+                audit.Text = (secret.Password.Length < 12 ? "Короткое значение: меньше 12 символов. " : "") +
+                    (duplicates > 0 ? $"Повторяется в других полях: {duplicates}." : "");
+            }
+            else
+            {
+                audit.Text = "";
+            }
+
+            audit.Visibility = kind.SelectedIndex == 1 && audit.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        };
+        var fieldId = existing?.Id ?? Guid.NewGuid();
         using var attachment = new AttachmentInput();
         attachment.Configure(appearancePreview ?? ViewModel.Settings, Root.ActualTheme == ElementTheme.Dark,
             () => ViewModel.IsUnlocked && captured == epoch);
-        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Microsoft.UI.Colors.OrangeRed) };
+        var error = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = new SolidColorBrush(Microsoft.UI.Colors.OrangeRed), Visibility = Visibility.Collapsed };
+        error.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) =>
+            error.Visibility = error.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed);
         attachment.PickRequested += async () =>
         {
             try
@@ -332,23 +496,68 @@ public sealed partial class MainWindow : Window
             catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException or InvalidOperationException)
             { error.Text = ex.Message; }
         };
-        kind.SelectionChanged += async (_, _) => await SwitchFieldKind(kind, text, secret, attachment);
+        kind.SelectionChanged += async (_, _) =>
+        {
+            generator.Visibility = kind.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            audit.Visibility = kind.SelectedIndex == 1 && audit.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+            await SwitchFieldKind(kind, text, secret, attachment);
+        };
         panel.Children.Add(description); panel.Children.Add(kind); panel.Children.Add(text); panel.Children.Add(secret);
         panel.Children.Add(attachment); panel.Children.Add(error);
-        var generate = new Button { Content = "Создать случайный пароль (24 символа)" };
-        generate.Click += (_, _) =>
-        {
-            secret.Password = SecretManager.Core.Services.PasswordGenerator.Generate();
-            kind.SelectedIndex = 1;
-        };
-        panel.Children.Add(generate);
+        panel.Children.Add(audit);
+        panel.Children.Add(generator);
+        panel.Children.Add(expires);
+        panel.Children.Add(clearExpiry);
         kind.SelectedIndex = (int)(existing?.Kind ?? FieldKind.Secret);
         if (existing?.Kind == FieldKind.Text) text.Text = existing.Value;
         if (existing?.Kind == FieldKind.Secret) secret.Password = existing.Value;
         await SwitchFieldKind(kind, text, secret, attachment);
         if (existing?.Kind is FieldKind.Image or FieldKind.File) await attachment.SetExistingAsync(existing);
         RequireSession(captured);
-        var dialog = Dialog(existing is null ? "Добавить поле" : "Редактирование поля", panel, "Сохранить");
+        var dialog = Dialog(existing is null ? "Добавить поле" : "Редактирование поля", new ScrollViewer { Content = panel, MaxHeight = 540 }, "Сохранить");
+        var history = new ComboBox { Header = existing is null ? "Удалённые поля этой ассоциации" : "История этого поля", HorizontalAlignment = HorizontalAlignment.Stretch };
+        var activeIds = ViewModel.TransferDocument.Associations.Single(topic => topic.Id == topicId).Fields.Select(field => field.Id).ToHashSet();
+        history.ItemsSource = ViewModel.TransferDocument.Revisions.Where(revision => revision.Association.Id == topicId)
+            .OrderByDescending(revision => revision.CreatedAt).SelectMany(revision => revision.Association.Fields
+                .Where(field => existing is null ? !activeIds.Contains(field.Id) : field.Id == existing.Id)
+                .Select(field => new ComboBoxItem { Tag = field, Content = $"{revision.CreatedAt.ToLocalTime():g} · {field.Description}" })).ToArray();
+        var historyBody = new StackPanel { Spacing = 8 };
+        historyBody.Children.Add(history);
+        historyBody.Children.Add(new TextBlock { Text = "Значение подставится в форму. Примените его кнопкой «Сохранить».", TextWrapping = TextWrapping.Wrap });
+        var restore = new Button { Content = "Подставить версию поля" };
+        restore.Click += async (_, _) =>
+        {
+            if (!ReferenceEquals(activeDialog, dialog) || !ViewModel.IsUnlocked || captured != epoch ||
+                history.SelectedItem is not ComboBoxItem { Tag: SecretField selected })
+            {
+                return;
+            }
+
+            try
+            {
+                fieldId = selected.Id;
+                expires.Date = selected.ExpiresAt;
+                description.Text = selected.Description;
+                text.Text = selected.Kind == FieldKind.Text ? selected.Value : "";
+                secret.Password = selected.Kind == FieldKind.Secret ? selected.Value : "";
+                kind.SelectedIndex = (int)selected.Kind;
+                await SwitchFieldKind(kind, text, secret, attachment);
+                if (selected.Kind is FieldKind.Image or FieldKind.File && ReferenceEquals(activeDialog, dialog))
+                {
+                    await attachment.SetExistingAsync(selected);
+                }
+            }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or ArgumentException or System.Runtime.InteropServices.COMException)
+            {
+                if (ReferenceEquals(activeDialog, dialog))
+                {
+                    error.Text = exception.Message;
+                }
+            }
+        };
+        historyBody.Children.Add(restore);
+        panel.Children.Add(new Expander { Header = existing is null ? "Восстановить удалённое поле" : "История изменений", Content = historyBody,
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
         attachment.StateChanged += () => dialog.IsPrimaryButtonEnabled = !attachment.IsBusy;
         using var pasteShortcut = new AttachmentPasteHandler(dialog, attachment, async images =>
         { kind.SelectedIndex = images ? 2 : 3; await SwitchFieldKind(kind, text, secret, attachment); },
@@ -364,7 +573,7 @@ public sealed partial class MainWindow : Window
                 if (fieldKind is FieldKind.Image or FieldKind.File && (attachment.IsBusy || !attachment.IsValidForCurrentMode))
                     throw new ArgumentException(attachment.IsBusy ? "Дождитесь загрузки вложения." : "Выберите подходящий файл или изображение.");
                 var value = fieldKind switch { FieldKind.Text => text.Text, FieldKind.Secret => secret.Password, _ => attachment.Attachment?.Base64 ?? throw new ArgumentException("Выберите файл.") };
-                saved = new SecretField { Id = existing?.Id ?? Guid.NewGuid(), Description = description.Text.Trim(), Kind = fieldKind,
+                saved = new SecretField { Id = fieldId, ExpiresAt = expires.Date, Description = description.Text.Trim(), Kind = fieldKind,
                     Value = value, FileName = fieldKind is FieldKind.File or FieldKind.Image ? attachment.Attachment!.FileName : null,
                     ContentType = fieldKind is FieldKind.File or FieldKind.Image ? attachment.Attachment!.ContentType : null };
                 VaultValidation.Validate(new() { Associations = [new() { Title = "Проверка", Fields = [saved] }] });
@@ -378,7 +587,15 @@ public sealed partial class MainWindow : Window
             if (result == ContentDialogResult.Primary && saved is not null)
             { ViewModel.SaveField(topicId, saved); Notify("Поле сохранено"); }
         }
-        finally { text.Text = ""; secret.Password = ""; saved = null; }
+        finally
+        {
+            text.Text = "";
+            secret.Password = "";
+            description.Text = "";
+            history.ItemsSource = null;
+            panel.Children.Clear();
+            saved = null;
+        }
     }
 
     private static async Task SwitchFieldKind(ComboBox kind, TextBox text, PasswordBox secret, AttachmentInput attachment)
@@ -452,6 +669,43 @@ public sealed partial class MainWindow : Window
         await File.WriteAllTextAsync(file, encrypted); RequireSession(captured);
         Notify("Зашифрованная копия сохранена. SHA-256 и AES-GCM защищают целостность.");
     });
+
+    private void ExportMenu_Opening(object sender, object args)
+    {
+        AutomaticBackupsItem.IsChecked = ViewModel.Settings.AutomaticBackups;
+    }
+
+    private async void AutomaticBackups_Click(object sender, RoutedEventArgs args)
+    {
+        await Run(() =>
+        {
+            RequireSession(epoch);
+            ViewModel.SaveSettings(ViewModel.Settings with { AutomaticBackups = AutomaticBackupsItem.IsChecked });
+            return Task.CompletedTask;
+        });
+    }
+
+    private async void CreateBackup_Click(object sender, RoutedEventArgs args)
+    {
+        await Run(() =>
+        {
+            RequireSession(epoch);
+            ViewModel.Backup(true);
+            Notify("Зашифрованная резервная копия создана");
+            return Task.CompletedTask;
+        });
+    }
+
+    private async void RestoreBackup_Click(object sender, RoutedEventArgs args)
+    {
+        await Run(async () =>
+        {
+            var captured = epoch;
+            RequireSession(captured);
+            using var panel = new VaultBackupPanel(ViewModel, () => ViewModel.IsUnlocked && captured == epoch && !exiting);
+            await ShowDialog(Dialog("Восстановление резервной копии", panel));
+        });
+    }
     private async void Import_Click(object sender, RoutedEventArgs e) => await Run(async () =>
     {
         var captured = epoch;
@@ -637,7 +891,8 @@ public sealed partial class MainWindow : Window
         if (exiting) return;
         var focused = args.WindowActivationState != WindowActivationState.Deactivated;
         if (focused) CheckFocusTimeout(); // Check before resetting elapsed unfocused time.
-        isFocused = focused; focus.SetFocused(focused, DateTimeOffset.UtcNow);
+        isFocused = focused;
+        focus.SetFocused(focused || quickAccessWindow?.IsActive == true, DateTimeOffset.UtcNow);
     }
     private void ShowWindow()
     { if (exiting) return; AppDiagnostics.Journal.Record(AppEvent.WindowShown); CheckFocusTimeout(); AppWindow.Show(); NativeMethods.Show(hwnd); Activate(); }
@@ -673,6 +928,7 @@ public sealed partial class MainWindow : Window
     }
     private void Window_Closed(object sender, WindowEventArgs args)
     {
+        quickAccessWindow?.Close();
         globalHotkey?.Dispose();
         timer.Tick -= MaintenanceTick;
         exiting = true;

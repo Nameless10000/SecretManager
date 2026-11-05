@@ -36,7 +36,7 @@ public sealed class ProductivityTests : IDisposable
             }
         }
 
-        Assert.Throws<ArgumentException>(() => PasswordGenerator.Generate(11));
+        Assert.Throws<ArgumentException>(() => PasswordGenerator.Generate(3));
         Assert.Throws<ArgumentException>(() => PasswordGenerator.Generate(129));
     }
 
@@ -63,9 +63,12 @@ public sealed class ProductivityTests : IDisposable
     public void ReminderWindowIncludesExpiredAndSevenDaysButNotUndated()
     {
         var now = DateTimeOffset.UtcNow;
-        var document = new VaultDocument { Associations = [new() { Title = "Expired", ExpiresAt = now.AddDays(-1) },
-            new() { Title = "Soon", ExpiresAt = now.AddDays(7) }, new() { Title = "Later", ExpiresAt = now.AddDays(8) }, new() { Title = "None" }] };
-        Assert.Equal(new[] { "Expired", "Soon" }, VaultInsights.Due(document, now).Select(item => item.Title));
+        var document = new VaultDocument { Associations = [new() { Title = "Topic", Fields = [
+            new() { Description = "Expired", ExpiresAt = now.AddDays(-1) },
+            new() { Description = "Soon", ExpiresAt = now.AddDays(7) },
+            new() { Description = "Later", ExpiresAt = now.AddDays(8) },
+            new() { Description = "None" }] }] };
+        Assert.Equal(new[] { "Expired", "Soon" }, VaultInsights.Due(document, now).Select(item => item.Description));
     }
 
     [Fact]
@@ -96,7 +99,7 @@ public sealed class ProductivityTests : IDisposable
         await model.UnlockAsync(Password, "");
         model.RestoreRevision(deleted.Id);
         Assert.True(model.TransferDocument.Associations.Single(item => item.Id == topic.Id).IsFavorite);
-        Assert.Equal(3, model.TransferDocument.SchemaVersion);
+        Assert.Equal(4, model.TransferDocument.SchemaVersion);
     }
 
     [Fact]

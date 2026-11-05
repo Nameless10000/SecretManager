@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using SecretManager.Core.Models;
 
 namespace SecretManager.Core.Services;
 
@@ -6,27 +7,36 @@ public static class PasswordGenerator
 {
     public static string Generate(int length = 24, bool symbols = true, bool excludeSimilar = true)
     {
-        if (length is < 12 or > 128)
+        return Generate(new PasswordGeneratorOptions { Length = length, Symbols = symbols, ExcludeSimilar = excludeSimilar });
+    }
+
+    public static string Generate(PasswordGeneratorOptions options)
+    {
+        ValidateOptions(options);
+        var groups = new List<string>();
+        if (options.Lowercase)
         {
-            throw new ArgumentException("Длина пароля: 12–128 символов.");
+            groups.Add(options.ExcludeSimilar ? "abcdefghjkmnpqrstuvwxyz" : "abcdefghijklmnopqrstuvwxyz");
         }
 
-        var groups = new[] { "abcdefghjkmnpqrstuvwxyz", "ABCDEFGHJKMNPQRSTUVWXYZ", "23456789" }.ToList();
-        if (!excludeSimilar)
+        if (options.Uppercase)
         {
-            groups[0] += "ilo";
-            groups[1] += "ILO";
-            groups[2] += "01";
+            groups.Add(options.ExcludeSimilar ? "ABCDEFGHJKMNPQRSTUVWXYZ" : "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
         }
 
-        if (symbols)
+        if (options.Digits)
+        {
+            groups.Add(options.ExcludeSimilar ? "23456789" : "0123456789");
+        }
+
+        if (options.Symbols)
         {
             groups.Add("!@#$%&*+-=?_");
         }
 
         var alphabet = string.Concat(groups);
-        var result = new char[length];
-        for (var index = 0; index < length; index++)
+        var result = new char[options.Length];
+        for (var index = 0; index < result.Length; index++)
         {
             var source = index < groups.Count ? groups[index] : alphabet;
             result[index] = source[RandomNumberGenerator.GetInt32(source.Length)];
@@ -39,5 +49,19 @@ public static class PasswordGenerator
         }
 
         return new string(result);
+    }
+
+    public static void ValidateOptions(PasswordGeneratorOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        if (options.Length is < 4 or > 128)
+        {
+            throw new ArgumentException("Длина пароля: 4–128 символов.");
+        }
+
+        if (!options.Lowercase && !options.Uppercase && !options.Digits && !options.Symbols)
+        {
+            throw new ArgumentException("Выберите хотя бы один набор символов.");
+        }
     }
 }

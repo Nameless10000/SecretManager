@@ -2,6 +2,7 @@ namespace SecretManager.Core.Models;
 
 public sealed record SecretField
 {
+    public DateTimeOffset? ExpiresAt { get; init; }
     public Guid Id { get; init; } = Guid.NewGuid();
     public string Description { get; init; } = "";
     public string Value { get; init; } = "";

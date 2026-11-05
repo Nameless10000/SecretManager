@@ -93,11 +93,11 @@ public sealed partial class MainWindow
             CompactChoice.IsOn = index % 2 == 0; SingleExpandedChoice.IsOn = index % 2 != 0;
             FontChoice.SelectedItem = index % 2 == 0 ? "Consolas" : "Segoe UI Variable";
             Root.UpdateLayout(); await Task.Delay(250);
-            CheckAllToggles();
+            await CheckAllToggles();
             SaveSettings_Click(this, new RoutedEventArgs()); await Wait(() => !actionBusy, "save settings");
             Settings_Click(this, new RoutedEventArgs()); Settings_Click(this, new RoutedEventArgs());
             Root.UpdateLayout(); await Task.Delay(250);
-            CheckAllToggles();
+            await CheckAllToggles();
             Check(CompactChoice.IsOn == ViewModel.Settings.CompactLayout && SingleExpandedChoice.IsOn == ViewModel.Settings.SingleExpandedAssociation,
                 "Reopened settings disagree with saved values.");
             Settings_Click(this, new RoutedEventArgs()); Pass("settings save and reopen " + theme);
@@ -265,63 +265,120 @@ public sealed partial class MainWindow
 
     private async Task CheckProductivityTools()
     {
-        Tools_Click(this, new RoutedEventArgs());
-        await Wait(() => activeDialog?.IsLoaded == true, "productivity tools dialog");
-        var panel = (SecretManager.App.Controls.VaultToolsPanel)activeDialog!.Content;
-        var title = Elements(panel).OfType<TextBox>().Single(item => item.Header as string == "Название");
-        title.Text = "Synthetic template";
-        var template = Elements(panel).OfType<ComboBox>().Single(item => item.Header as string == "Шаблон");
-        template.SelectedIndex = 1;
-        InvokeProductivityButton(panel, "Создать по шаблону");
-        await Wait(() => ViewModel.TotalCount == 4, "template creation");
+        var creation = Run(() => EditAssociation(null));
+        await Wait(() => activeDialog?.IsLoaded == true, "association creation");
+        var editor = (SecretManager.App.Controls.AssociationEditor)activeDialog!.Content;
+        Elements(editor).OfType<TextBox>().Single(item => item.Header as string == "Название").Text = "Synthetic template";
+        Elements(editor).OfType<ComboBox>().Single(item => item.Header as string == "Шаблон").SelectedIndex = 1;
+        Elements(editor).OfType<CheckBox>().Single(item => item.Content as string == "Избранное").IsChecked = true;
+        Elements(editor).OfType<TextBox>().Single(item => item.Header as string == "Теги через запятую").Text = "Работа, API";
+        Check(!Elements(editor).OfType<CalendarDatePicker>().Any(), "Expiry still belongs to the association.");
+        await SaveUsageSnapshot(activeDialog, Path.Combine(AppPaths.DataDirectory, "association-editor.png"));
+        InvokeProductivityButton(activeDialog, "Сохранить");
+        await creation;
         var topic = ViewModel.TransferDocument.Associations.Single(item => item.Title == "Synthetic template");
-        Check(topic.Fields.Count == 3, "Website template did not create fields.");
-        var topics = Elements(panel).OfType<ComboBox>().Single(item => item.Header as string == "Ассоциация");
-        topics.SelectedItem = topic;
-        await Task.Delay(100);
-        Elements(panel).OfType<CheckBox>().Single(item => item.Content as string == "Избранное").IsChecked = true;
-        Elements(panel).OfType<TextBox>().Single(item => item.Header as string == "Теги через запятую").Text = "Работа, API";
-        Elements(panel).OfType<CalendarDatePicker>().Single().Date = DateTimeOffset.UtcNow.AddDays(1);
-        InvokeProductivityButton(panel, "Сохранить свойства выбранной записи");
-        await Wait(() => ViewModel.TransferDocument.Associations.Single(item => item.Id == topic.Id).IsFavorite, "favorite persistence");
-        Check(ViewModel.TransferDocument.Associations.Single(item => item.Id == topic.Id).Tags.Count == 2, "Tags were not saved.");
-        InvokeProductivityButton(panel, "Сгенерировать");
-        await Wait(() => Elements(panel).OfType<PasswordBox>().Any(item => item.Password.Length == 24), "password generation");
-        InvokeProductivityButton(panel, "Создать резервную копию сейчас");
-        await Wait(() => Directory.Exists(ViewModel.BackupDirectory) && Directory.GetFiles(ViewModel.BackupDirectory, "*.smbackup").Length > 0, "encrypted backup");
-        InvokeProductivityButton(panel, "Показать только избранное / все");
-        await Wait(() => ViewModel.Associations.Count == 1, "favorite filter");
-        InvokeProductivityButton(panel, "Показать только избранное / все");
-        await Wait(() => ViewModel.Associations.Count == 4, "clear favorite filter");
-        var copies = Elements(panel).OfType<ComboBox>().Single(item => item.Header as string == "Зашифрованные резервные копии");
-        copies.SelectedIndex = 0;
-        Elements(panel).OfType<CheckBox>().Single(item => item.Content as string == "Подтверждаю замену текущих записей выбранной копией").IsChecked = true;
-        var backupPassword = Elements(panel).OfType<PasswordBox>().Single(item => item.Header as string == "Мастер-пароль на момент создания копии");
-        backupPassword.Password = "wrong password";
-        InvokeProductivityButton(panel, "Восстановить резервную копию");
-        await Wait(() => Elements(panel).OfType<TextBlock>().Any(item => item.Text.StartsWith("Не удалось восстановить копию")), "wrong backup password rejected");
-        Check(ViewModel.TotalCount == 4, "Rejected backup damaged active records.");
-        Elements(panel).OfType<CheckBox>().Single(item => item.Content as string == "Подтверждаю замену текущих записей выбранной копией").IsChecked = true;
-        backupPassword.Password = "synthetic UI test password 123";
-        InvokeProductivityButton(panel, "Восстановить резервную копию");
-        await Wait(() => Elements(panel).OfType<TextBlock>().Any(item => item.Text == "Копия восстановлена"), "restore encrypted backup in UI");
-        Check(backupPassword.Password.Length == 0, "Backup password was retained.");
-        var versions = Elements(panel).OfType<ComboBox>().Single(item => (item.Header as string)?.StartsWith("История и корзина") == true);
-        versions.SelectedIndex = 0;
-        InvokeProductivityButton(panel, "Восстановить выбранную версию / удалённую запись");
-        await Wait(() => !ViewModel.TransferDocument.Associations.Single(item => item.Id == topic.Id).IsFavorite, "restore previous metadata version");
+        Check(topic.Fields.Count == 3 && topic.IsFavorite && topic.Tags.Count == 2, "Contextual creation lost template or metadata.");
+        Favorites_Click(this, new RoutedEventArgs());
+        Check(ViewModel.Associations.Count == 1, "Favorite navigation did not filter.");
+        Favorites_Click(this, new RoutedEventArgs());
+
+        GeneratorSettings_Click(this, new RoutedEventArgs());
+        await Wait(() => activeDialog?.IsLoaded == true, "generator preferences");
+        var generator = Elements(activeDialog!).OfType<SecretManager.App.Controls.PasswordGeneratorSettingsControl>().Single();
+        Elements(generator).OfType<NumberBox>().Single().Value = 8;
+        foreach (var choice in Elements(generator).OfType<CheckBox>())
+        {
+            choice.IsChecked = choice.Content as string == "Цифры 0–9";
+        }
+        await SaveUsageSnapshot(activeDialog!, Path.Combine(AppPaths.DataDirectory, "generator-settings.png"));
+        InvokeProductivityButton(activeDialog!, "Сохранить");
+        await Wait(() => !actionBusy, "save generator preferences");
+        Check(ViewModel.Settings.PasswordGenerator.Length == 8 && !ViewModel.Settings.PasswordGenerator.Symbols, "Generator preferences not saved.");
+
+        var field = topic.Fields.Single(item => item.Kind == FieldKind.Secret);
+        var editing = Run(() => EditField(topic.Id, field));
+        await Wait(() => activeDialog?.IsLoaded == true, "secret editor");
+        var kind = Elements(activeDialog!).OfType<ComboBox>().Single(item => item.Header as string == "Тип значения");
+        var generate = Elements(activeDialog!).OfType<Button>().Single(item => item.Content as string == "Сгенерировать пароль");
+        kind.SelectedIndex = 0;
+        await Wait(() => generate.Visibility == Visibility.Collapsed, "generator hidden for text");
+        kind.SelectedIndex = 1;
+        await Wait(() => generate.Visibility == Visibility.Visible, "generator visible for secrets");
+        InvokeProductivityButton(activeDialog!, "Сгенерировать пароль");
+        var secret = Elements(activeDialog!).OfType<PasswordBox>().Single();
+        await Wait(() => secret.Password.Length == 8, "configured password generation");
+        Check(secret.Password.All(char.IsDigit), "Generator ignored selected alphabet.");
+        Elements(activeDialog!).OfType<CalendarDatePicker>().Single().Date = DateTimeOffset.UtcNow.AddDays(1);
+        await SaveUsageSnapshot(activeDialog!, Path.Combine(AppPaths.DataDirectory, "field-editor.png"));
+        InvokeProductivityButton(activeDialog!, "Сохранить");
+        await editing;
+        Check(ViewModel.TransferDocument.Associations.Single(item => item.Id == topic.Id).Fields.Single(item => item.Id == field.Id).ExpiresAt is not null, "Per-field expiry not saved.");
+        await CheckContextualHistory(topic, field);
+        await CheckSettingsNavigation();
+
+        ViewModel.Backup(true);
+        RestoreBackup_Click(this, new RoutedEventArgs());
+        await Wait(() => activeDialog?.IsLoaded == true, "restore backup from import menu");
+        Check(activeDialog!.Content is SecretManager.App.Controls.VaultBackupPanel, "Import recovery panel missing.");
+        var recovery = (SecretManager.App.Controls.VaultBackupPanel)activeDialog.Content;
+        Elements(recovery).OfType<ComboBox>().Single().SelectedIndex = 0;
+        Elements(recovery).OfType<PasswordBox>().Single().Password = "wrong synthetic password";
+        Elements(recovery).OfType<CheckBox>().Single().IsChecked = true;
+        InvokeProductivityButton(recovery, "Восстановить резервную копию");
+        await Wait(() => Elements(recovery).OfType<TextBlock>().Any(item => item.Text.StartsWith("Не удалось восстановить")), "backup password rejection");
+        Check(ViewModel.TransferDocument.Associations.Any(item => item.Id == topic.Id), "Rejected backup changed current records.");
+        Elements(recovery).OfType<PasswordBox>().Single().Password = "synthetic UI test password 123";
+        Elements(recovery).OfType<CheckBox>().Single().IsChecked = true;
+        InvokeProductivityButton(recovery, "Восстановить резервную копию");
+        await Wait(() => Elements(recovery).OfType<TextBlock>().Any(item => item.Text == "Копия восстановлена"), "backup recovery");
         activeDialog.Hide();
-        await Wait(() => !actionBusy, "tools dialog close");
-        Check(!Elements(panel).OfType<PasswordBox>().Any(), "Disposed tools retained password controls.");
+        await Wait(() => !actionBusy, "close recovery");
         ViewModel.DeleteAssociation(topic.Id);
+        AppWindow.Hide();
         GlobalQuickAccess();
-        await Wait(() => activeDialog?.IsLoaded == true, "quick access dialog");
-        Check(activeDialog!.Content is SecretManager.App.Controls.QuickAccessPanel, "Quick access panel missing.");
+        if (quickAccessWindow is not null)
+        {
+            SecretManager.ThemeChecks.UsageChecks.SuppressPhysicalInput(quickAccessWindow);
+        }
+        await Wait(() => quickAccessWindow is not null, "standalone quick search");
+        Check(!AppWindow.IsVisible && activeDialog is null, "Quick search activated the main app.");
+        Check(((Microsoft.UI.Windowing.OverlappedPresenter)quickAccessWindow!.AppWindow.Presenter).IsAlwaysOnTop, "Quick search is not topmost.");
+        isFocused = false;
+        focus.SetFocused(false, DateTimeOffset.UtcNow.AddHours(-1));
+        QuickAccessFocusChanged(true);
+        CheckFocusTimeout();
+        Check(ViewModel.IsUnlocked, "Focused quick search did not stop the unfocused lock timer.");
         ViewModel.Lock();
-        await Wait(() => !actionBusy, "lock closes quick access");
+        await Wait(() => quickAccessWindow is null, "lock closes floating search");
+        GlobalQuickAccess();
+        if (quickAccessWindow is not null)
+        {
+            SecretManager.ThemeChecks.UsageChecks.SuppressPhysicalInput(quickAccessWindow);
+        }
+        await Wait(() => quickAccessWindow?.Content is FrameworkElement root && root.IsLoaded, "floating unlock form");
+        var quick = quickAccessWindow!;
+        Elements((FrameworkElement)quick.Content).OfType<PasswordBox>().Single().Password = "synthetic UI test password 123";
+        InvokeProductivityButton((FrameworkElement)quick.Content, "Разблокировать");
+        await Wait(() => ViewModel.IsUnlocked && !ViewModel.IsBusy, "unlock within quick search");
+        Check(!AppWindow.IsVisible, "Floating unlock activated the main app.");
+        ViewModel.Lock();
+        await Wait(() => quickAccessWindow is null, "close quick search on lock");
+
+        GlobalQuickAccess();
+        if (quickAccessWindow is not null)
+        {
+            SecretManager.ThemeChecks.UsageChecks.SuppressPhysicalInput(quickAccessWindow);
+        }
+        await Wait(() => quickAccessWindow?.Content is FrameworkElement root && root.IsLoaded, "floating unlock before close");
+        quick = quickAccessWindow!;
+        Elements((FrameworkElement)quick.Content).OfType<PasswordBox>().Single().Password = "synthetic UI test password 123";
+        InvokeProductivityButton((FrameworkElement)quick.Content, "Разблокировать");
+        quick.Close();
+        await Wait(() => !ViewModel.IsBusy, "cancel pending floating unlock");
+        Check(!ViewModel.IsUnlocked && quickAccessWindow is null, "Closing floating unlock left an unlocked session behind.");
+        ShowWindow();
         CheckLocked();
     }
-
     internal async Task CloseAfterUsageChecks()
     {
         var closed = new TaskCompletionSource();
@@ -335,10 +392,21 @@ public sealed partial class MainWindow
         await Wait(() => closed.Task.IsCompleted, "window exit");
         release.TrySetResult(); await pending;
     }
-    private void CheckAllToggles()
+    private async Task CheckAllToggles()
     {
-        foreach (var toggle in new[] { CompactChoice, SingleExpandedChoice, TrayChoice, LockHiddenChoice, StartupChoice, AutoUpdateChoice })
-            SecretManager.ThemeChecks.ThemeCheckWindow.CheckToggle(toggle);
+        var checkedControls = new HashSet<ToggleSwitch>();
+        foreach (var category in SettingsSections.Children.OfType<Expander>())
+        {
+            category.IsExpanded = true;
+            Root.UpdateLayout();
+            await Task.Delay(120);
+            foreach (var toggle in Elements(category).OfType<ToggleSwitch>())
+            {
+                SecretManager.ThemeChecks.ThemeCheckWindow.CheckToggle(toggle);
+                checkedControls.Add(toggle);
+            }
+        }
+        Check(checkedControls.Count == 6, "Settings categories hid a toggle from verification.");
     }
     private void CheckLocked() => Check(!ViewModel.IsUnlocked && ViewModel.Associations.Count == 0 && LoginView.Visibility == Visibility.Visible &&
         VaultView.Visibility == Visibility.Collapsed && SettingsPanel.Visibility == Visibility.Collapsed, "Lock did not clear and hide the vault UI.");

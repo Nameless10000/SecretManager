@@ -47,6 +47,7 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
 
     private void Open(VaultDocument value, byte[] newKey, byte[] newSalt)
     {
+        value = VaultMigration.Upgrade(value);
         TitleSearchIndex newIndex;
         try { newIndex = new TitleSearchIndex(value.Associations); }
         catch { CryptographicOperations.ZeroMemory(newKey); throw; }
@@ -127,7 +128,7 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
     public static VaultDocument ReadExport(string json, string password)
     {
         var value = VaultCrypto.Unprotect(ExportPackage.Read(json), password, VaultCrypto.ExportContext);
-        try { return value.Document; }
+        try { return VaultMigration.Upgrade(value.Document); }
         finally { CryptographicOperations.ZeroMemory(value.Key); }
     }
 
@@ -152,7 +153,7 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
             try
             {
                 backups.Write(repository.Read()!, true);
-                Save(restored.Document with { Settings = Document.Settings });
+                Save(VaultMigration.Upgrade(restored.Document) with { Settings = Document.Settings });
             }
             finally
             {

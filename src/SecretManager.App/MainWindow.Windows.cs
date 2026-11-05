@@ -36,7 +36,7 @@ public sealed partial class MainWindow
     private void SaveDevicePreferences()
     {
         if (startupRegistration.Enabled != StartupChoice.IsOn) startupRegistration.SetEnabled(StartupChoice.IsOn);
-        new DevicePreferences(AutoUpdateChoice.IsOn).Save(AppPaths.DataDirectory);
+        (DevicePreferences.Load(AppPaths.DataDirectory) with { AutomaticUpdates = AutoUpdateChoice.IsOn }).Save(AppPaths.DataDirectory);
         automaticUpdates = AutoUpdateChoice.IsOn;
     }
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e) => await CheckUpdatesAsync(true);

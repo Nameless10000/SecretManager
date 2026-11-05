@@ -102,7 +102,7 @@ public sealed class PartialTransferTests
             Assert.DoesNotContain("synthetic omitted value", json);
             var imported = VaultSession.ReadExport(json, "12345678");
             Assert.True(imported.IsPartial); Assert.Single(imported.Associations); Assert.Single(imported.Associations[0].Fields);
-            Assert.Equal(3, imported.SchemaVersion);
+            Assert.Equal(4, imported.SchemaVersion);
             Assert.ThrowsAny<CryptographicException>(() => VaultSession.ReadExport(json, "87654321"));
             Assert.ThrowsAny<CryptographicException>(() => VaultCrypto.Unprotect(ExportPackage.Read(json), "12345678", VaultCrypto.LocalContext));
             Assert.Throws<ArgumentException>(() => session.Export("1234567"));

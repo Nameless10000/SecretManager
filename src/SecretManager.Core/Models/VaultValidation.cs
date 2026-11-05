@@ -23,12 +23,20 @@ public static class VaultValidation
 
     public static void Validate(VaultDocument document)
     {
-        if (document.SchemaVersion is not (1 or 2 or 3) || document.SchemaVersion == 2 && !document.IsPartial ||
+        if (document.SchemaVersion is not (1 or 2 or 3 or 4) || document.SchemaVersion == 2 && !document.IsPartial ||
             document.Associations is null || document.Settings is null)
             throw new InvalidDataException("Неподдерживаемый формат хранилища.");
         if (document.Associations.Count > 10_000 || document.Associations.Any(a => a is null))
             throw new InvalidDataException("Слишком много ассоциаций или неверный формат.");
         var ids = new HashSet<Guid>();
+        try
+        {
+            SecretManager.Core.Services.PasswordGenerator.ValidateOptions(document.Settings.PasswordGenerator);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidDataException("Некорректные параметры генератора.", exception);
+        }
         if (document.Revisions is null || document.Revisions.Count > 100)
         {
             throw new InvalidDataException("Слишком много версий истории.");

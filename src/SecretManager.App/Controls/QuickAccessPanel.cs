@@ -16,17 +16,46 @@ public sealed class QuickAccessPanel : UserControl, IDisposable
     {
         this.model = model;
         this.isCurrent = isCurrent;
-        var panel = new StackPanel { Spacing = 12 };
+        var panel = new Grid { RowSpacing = 12 };
+        panel.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        panel.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         panel.Children.Add(search);
-        panel.Children.Add(new ScrollViewer { Content = results, MaxHeight = 380 });
+        var scroll = new ScrollViewer { Content = results, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
+        Grid.SetRow(scroll, 1);
+        panel.Children.Add(scroll);
         Content = panel;
+        Loaded += (_, _) => FocusSearch();
         search.TextChanged += SearchChanged;
+        search.KeyDown += SearchKeyDown;
+        model.PropertyChanged += ModelChanged;
         Refresh();
     }
 
     private void SearchChanged(object sender, TextChangedEventArgs args)
     {
         Refresh();
+    }
+
+    private void ModelChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        if (args.PropertyName == nameof(MainViewModel.CountLabel))
+        {
+            Refresh();
+        }
+    }
+
+    private void SearchKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs args)
+    {
+        if (args.Key == Windows.System.VirtualKey.Enter && results.Children.OfType<Button>().FirstOrDefault() is { } first)
+        {
+            CopyClicked(first, new RoutedEventArgs());
+            args.Handled = true;
+        }
+    }
+
+    public void FocusSearch()
+    {
+        search.Focus(FocusState.Programmatic);
     }
 
     private void Refresh()
@@ -52,6 +81,11 @@ public sealed class QuickAccessPanel : UserControl, IDisposable
                 results.Children.Add(button);
             }
         }
+
+        if (results.Children.Count == 0)
+        {
+            results.Children.Add(new TextBlock { Text = "Ничего не найдено", TextWrapping = TextWrapping.Wrap });
+        }
     }
 
     private void CopyClicked(object sender, RoutedEventArgs args)
@@ -66,6 +100,8 @@ public sealed class QuickAccessPanel : UserControl, IDisposable
     {
         disposed = true;
         search.TextChanged -= SearchChanged;
+        search.KeyDown -= SearchKeyDown;
+        model.PropertyChanged -= ModelChanged;
         search.Text = "";
         results.Children.Clear();
     }

@@ -4,9 +4,14 @@ namespace SecretManager.App.Services;
 
 internal sealed record DevicePreferences(bool AutomaticUpdates = true)
 {
+    public HotkeyGesture QuickAccess { get; init; } = new();
     internal static DevicePreferences Load(string folder)
     {
-        try { return JsonSerializer.Deserialize<DevicePreferences>(File.ReadAllText(Path.Combine(folder, "device-settings.json"))) ?? new(); }
+        try
+        {
+            var value = JsonSerializer.Deserialize<DevicePreferences>(File.ReadAllText(Path.Combine(folder, "device-settings.json"))) ?? new();
+            return value.QuickAccess is { IsValid: true } ? value : value with { QuickAccess = new() };
+        }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException) { return new(); }
     }
     internal void Save(string folder)

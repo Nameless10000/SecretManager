@@ -19,6 +19,13 @@ internal static class NativeHotkeyChecks
             }
 
             hotkey.Invoked += () => invoked = true;
+            using (var conflict = new GlobalHotkey(0x87))
+            {
+                if (conflict.Registered)
+                {
+                    throw new InvalidOperationException("Conflicting gesture unexpectedly replaced the registered hotkey.");
+                }
+            }
             SendMessageW(hotkey.Handle, 0x0312, 1, 0);
             if (!invoked)
             {

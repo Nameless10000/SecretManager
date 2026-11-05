@@ -8,10 +8,10 @@ public sealed class GlobalHotkey : Forms.NativeWindow, IDisposable
     public event Action? Invoked;
     public bool Registered { get; }
 
-    public GlobalHotkey(uint key = 0x53)
+    public GlobalHotkey(uint key = 0x53, uint modifiers = 3)
     {
         CreateHandle(new Forms.CreateParams());
-        Registered = RegisterHotKey(Handle, 1, 0x4003, key);
+        Registered = RegisterHotKey(Handle, 1, 0x4000 | modifiers, key);
     }
 
     [DllImport("user32.dll", SetLastError = true)]

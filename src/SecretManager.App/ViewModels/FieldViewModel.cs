@@ -5,7 +5,7 @@ namespace SecretManager.App.ViewModels;
 public sealed class FieldViewModel(SecretField model)
 {
     public SecretField Model { get; } = model;
-    public string Description => Model.Description;
+    public string Description => Model.Description + (Model.ExpiresAt is { } date ? $"\nдо {date.ToLocalTime():d}" : "");
     public string DisplayValue => Model.Kind switch
     {
         FieldKind.Secret => "••••••••••••",

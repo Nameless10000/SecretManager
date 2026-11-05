@@ -28,9 +28,9 @@ public static class VaultInsights
         return findings;
     }
 
-    public static IReadOnlyList<SecretAssociation> Due(VaultDocument document, DateTimeOffset now)
+    public static IReadOnlyList<SecretField> Due(VaultDocument document, DateTimeOffset now)
     {
-        return document.Associations.Where(topic => topic.ExpiresAt <= now.AddDays(7))
-            .OrderBy(topic => topic.ExpiresAt).ToArray();
+        return document.Associations.SelectMany(topic => topic.Fields).Where(field => field.ExpiresAt <= now.AddDays(7))
+            .OrderBy(field => field.ExpiresAt).ToArray();
     }
 }
