@@ -72,6 +72,38 @@ public sealed class StorageLimitTests : IDisposable
         }
     }
 
+    [Fact]
+    public void EncryptedEnvelopeLargerThanLegacy64MegabytesRoundTrips()
+    {
+        var value = new string('s', 1_000_000);
+        var document = new VaultDocument
+        {
+            Settings = new() { MaxStorageMegabytes = 128 },
+            Associations = [new() { Title = "Large synthetic vault", Fields = Enumerable.Range(0, 70)
+                .Select(index => new SecretField { Description = "Field " + index, Value = value }).ToList() }]
+        };
+        var encrypted = SecretManager.Core.Security.VaultCrypto.Protect(document, Password, SecretManager.Core.Security.VaultCrypto.LocalContext);
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(encrypted.Envelope);
+            var parsed = SecretManager.Core.Security.VaultCrypto.Parse(json);
+            var opened = SecretManager.Core.Security.VaultCrypto.Unprotect(parsed, Password, SecretManager.Core.Security.VaultCrypto.LocalContext);
+            try
+            {
+                Assert.Equal(70, opened.Document.Associations[0].Fields.Count);
+                Assert.Equal(value, opened.Document.Associations[0].Fields[69].Value);
+            }
+            finally
+            {
+                System.Security.Cryptography.CryptographicOperations.ZeroMemory(opened.Key);
+            }
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(encrypted.Key);
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(folder))
