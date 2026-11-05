@@ -5,12 +5,10 @@ using SecretManager.Core.Models;
 
 namespace SecretManager.Core.Security;
 
-public sealed record EncryptedEnvelope(int Version, int Iterations, string Salt, string Nonce, string Tag, string Ciphertext);
-
 public static class VaultCrypto
 {
     public const int Iterations = 600_000;
-    public const int MaxEnvelopeBytes = 90 * 1024 * 1024;
+    public const int MaxEnvelopeBytes = 768 * 1024 * 1024;
     public const string LocalContext = "SecretManager/local/v1";
     public const string ExportContext = "SecretManager/export/v1";
 
@@ -45,8 +43,10 @@ public static class VaultCrypto
         var plaintext = JsonSerializer.SerializeToUtf8Bytes(document, VaultValidation.JsonOptions);
         try
         {
-            if (plaintext.Length > VaultValidation.MaxDocumentBytes)
-                throw new InvalidDataException("Хранилище превышает 64 МБ. Уменьшите размер вложений.");
+            if (plaintext.Length > (long)document.Settings.MaxStorageMegabytes * 1024 * 1024)
+            {
+                throw new InvalidDataException($"Содержимое превышает лимит {document.Settings.MaxStorageMegabytes} МБ. Увеличьте лимит в настройках или уменьшите объём данных.");
+            }
             var nonce = RandomNumberGenerator.GetBytes(12);
             var tag = new byte[16];
             var ciphertext = new byte[plaintext.Length];
@@ -75,6 +75,10 @@ public static class VaultCrypto
                 var document = JsonSerializer.Deserialize<VaultDocument>(plain, VaultValidation.JsonOptions)
                     ?? throw new InvalidDataException("Пустое хранилище.");
                 VaultValidation.Validate(document);
+                if (plain.Length > (long)document.Settings.MaxStorageMegabytes * 1024 * 1024)
+                {
+                    throw new InvalidDataException("Содержимое превышает установленный лимит хранилища.");
+                }
                 return (document, key);
             }
             finally { CryptographicOperations.ZeroMemory(plain); }

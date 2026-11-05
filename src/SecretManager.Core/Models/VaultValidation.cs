@@ -5,20 +5,39 @@ namespace SecretManager.Core.Models;
 public static class VaultValidation
 {
     public const int MaxAttachmentBytes = 10 * 1024 * 1024;
-    public const int MaxDocumentBytes = 64 * 1024 * 1024;
+    public const int MaxDocumentBytes = 512 * 1024 * 1024;
     public static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = false };
 
     public static void Validate(VaultDocument document)
     {
-        if (document.SchemaVersion is not (1 or 2) || document.SchemaVersion == 2 && !document.IsPartial ||
+        if (document.SchemaVersion is not (1 or 2 or 3) || document.SchemaVersion == 2 && !document.IsPartial ||
             document.Associations is null || document.Settings is null)
             throw new InvalidDataException("Неподдерживаемый формат хранилища.");
         if (document.Associations.Count > 10_000 || document.Associations.Any(a => a is null))
             throw new InvalidDataException("Слишком много ассоциаций или неверный формат.");
         var ids = new HashSet<Guid>();
+        if (document.Revisions is null || document.Revisions.Count > 100)
+        {
+            throw new InvalidDataException("Слишком много версий истории.");
+        }
+
+        foreach (var revision in document.Revisions)
+        {
+            if (revision is null || revision.Id == Guid.Empty || revision.Association is null)
+            {
+                throw new InvalidDataException("Некорректная история.");
+            }
+
+            Validate(new VaultDocument { Associations = [revision.Association] });
+        }
         var titles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var association in document.Associations)
         {
+            if (association.Tags is null || association.Tags.Count > 20 ||
+                association.Tags.Any(tag => string.IsNullOrWhiteSpace(tag) || tag.Length > 50))
+            {
+                throw new InvalidDataException("Допускается до 20 тегов по 50 символов.");
+            }
             if (association.Id == Guid.Empty || !ids.Add(association.Id) ||
                 string.IsNullOrWhiteSpace(association.Title) || association.Title.Length > 200 || !titles.Add(association.Title.Trim()) ||
                 association.Fields is null || association.Fields.Count > 1000)
@@ -50,7 +69,8 @@ public static class VaultValidation
                     throw new InvalidDataException("Текстовое поле слишком велико.");
             }
         }
-        if (!Enum.IsDefined(document.Settings.Theme) || document.Settings.AutoLockMinutes is < 0 or > 120 ||
+        if (document.Settings.MaxStorageMegabytes is < 16 or > 512 ||
+            !Enum.IsDefined(document.Settings.Theme) || document.Settings.AutoLockMinutes is < 0 or > 120 ||
             document.Settings.ClipboardClearSeconds is < 0 or > 300 ||
             !Enum.IsDefined(document.Settings.AnimationLevel) ||
             !double.IsFinite(document.Settings.MotionSpeed) || document.Settings.MotionSpeed is < 0.5 or > 2 ||

@@ -6,7 +6,7 @@ namespace SecretManager.Core.Security;
 
 public sealed record ExportPackage(string Format, int Version, string Payload, string Sha256)
 {
-    public const int MaxPackageBytes = VaultCrypto.MaxEnvelopeBytes + 1024 * 1024;
+    public const int MaxPackageBytes = 1024 * 1024 * 1024;
     public static async Task<string> ReadTextAsync(Stream source, int maxBytes = MaxPackageBytes, CancellationToken cancellationToken = default)
     {
         if (maxBytes is <= 0 or > MaxPackageBytes) throw new ArgumentOutOfRangeException(nameof(maxBytes));

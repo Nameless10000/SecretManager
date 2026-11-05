@@ -79,6 +79,7 @@ public static class VaultMerge
     }
 
     private static bool Equivalent(SecretAssociation a, SecretAssociation b) => a.Title == b.Title &&
+        a.IsFavorite == b.IsFavorite && a.ExpiresAt == b.ExpiresAt && a.Tags.SequenceEqual(b.Tags) &&
         JsonSerializer.Serialize(a.Fields, VaultValidation.JsonOptions) == JsonSerializer.Serialize(b.Fields, VaultValidation.JsonOptions);
 
     private static SecretAssociation ReidentifyFieldCollisions(SecretAssociation incoming, IEnumerable<SecretAssociation> existing)

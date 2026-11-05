@@ -5,6 +5,7 @@
 TestResults/
 artifacts/
 .tools/
+.codegraph/
 *.user
 *.suo
 *.db

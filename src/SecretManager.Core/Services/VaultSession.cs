@@ -10,6 +10,8 @@ namespace SecretManager.Core.Services;
 public sealed class VaultSession(VaultRepository repository) : IDisposable
 {
     private readonly object sync = new();
+    private readonly VaultBackups backups = new(repository.Path);
+    public string BackupDirectory => backups.DirectoryPath;
     private byte[]? key;
     private byte[]? salt;
     private VaultDocument? document;
@@ -70,8 +72,15 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
         {
             _ = Document;
             VaultValidation.Validate(next);
+            next = VaultHistory.Capture(Document, next, out var requiresBackup);
+            VaultValidation.Validate(next);
             using var candidate = new DisposableIndexHolder(new TitleSearchIndex(next.Associations));
             var envelope = VaultCrypto.Encrypt(next, key!, salt!, VaultCrypto.LocalContext);
+            if (Document.Settings.AutomaticBackups || requiresBackup)
+            {
+                backups.Write(repository.Read()!, requiresBackup || Document.Associations.Count > next.Associations.Count);
+            }
+
             repository.Write(envelope);
             index?.Dispose();
             index = candidate.Detach();
@@ -90,6 +99,11 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
             var updated = VaultCrypto.Protect(Document, newPassword, VaultCrypto.LocalContext);
             try
             {
+                if (Document.Settings.AutomaticBackups)
+                {
+                    backups.Write(current, true);
+                }
+
                 repository.Write(updated.Envelope);
                 CryptographicOperations.ZeroMemory(key!);
                 key = updated.Key;
@@ -103,7 +117,7 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
     {
         lock (sync)
         {
-            var selected = selection is null ? Document : VaultSelection.Select(Document, selection);
+            var selected = selection is null ? Document with { Revisions = [] } : VaultSelection.Select(Document, selection);
             var value = VaultCrypto.Protect(selected, password, VaultCrypto.ExportContext);
             try { return ExportPackage.Create(value.Envelope); }
             finally { CryptographicOperations.ZeroMemory(value.Key); }
@@ -115,6 +129,44 @@ public sealed class VaultSession(VaultRepository repository) : IDisposable
         var value = VaultCrypto.Unprotect(ExportPackage.Read(json), password, VaultCrypto.ExportContext);
         try { return value.Document; }
         finally { CryptographicOperations.ZeroMemory(value.Key); }
+    }
+
+    public void Backup(bool force = false)
+    {
+        lock (sync)
+        {
+            _ = Document;
+            if (force || Document.Settings.AutomaticBackups)
+            {
+                backups.Write(repository.Read()!, force);
+            }
+        }
+    }
+
+    public void RestoreBackup(string json, string password)
+    {
+        lock (sync)
+        {
+            _ = Document;
+            var restored = VaultCrypto.Unprotect(ExportPackage.Read(json), password, VaultCrypto.LocalContext);
+            try
+            {
+                backups.Write(repository.Read()!, true);
+                Save(restored.Document with { Settings = Document.Settings });
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(restored.Key);
+            }
+        }
+    }
+
+    public void RestoreRevision(Guid revisionId)
+    {
+        lock (sync)
+        {
+            Save(VaultHistory.Restore(Document, revisionId));
+        }
     }
 
     public void Lock()

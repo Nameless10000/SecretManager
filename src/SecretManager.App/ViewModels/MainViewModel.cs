@@ -19,6 +19,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private int generation;
     private Guid? lastExpanded;
     private AppSettings settings = new();
+    public bool FavoritesOnly { get; set; }
+    public string BackupDirectory => session.BackupDirectory;
+
+    public void Backup(bool force = false)
+    {
+        session.Backup(force);
+    }
+
+    public void RestoreBackup(string json, string password)
+    {
+        session.RestoreBackup(json, password);
+        Refresh();
+    }
+
+    public void RestoreRevision(Guid id)
+    {
+        session.RestoreRevision(id);
+        Refresh();
+    }
     public MainViewModel(string path)
     {
         session = new VaultSession(new VaultRepository(path));
@@ -63,6 +82,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (disposed) return;
         generation++;
         session.Lock();
+        FavoritesOnly = false;
         // Collection/property bindings read CountLabel synchronously. Publish a consistent
         // locked state before clearing the collection; the session is already closed.
         unlocked = false;
@@ -78,7 +98,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var expanded = Associations.Where(a => a.IsExpanded).Select(a => a.Model.Id).ToHashSet();
         DetachAssociations();
         Associations.Clear();
-        foreach (var a in session.Search(Query))
+        var tagged = session.Document.Associations.Where(topic => !string.IsNullOrWhiteSpace(Query) &&
+            topic.Tags.Any(tag => Query.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Any(word => tag.StartsWith(word, StringComparison.CurrentCultureIgnoreCase))));
+        var matches = session.Search(Query).Concat(tagged).DistinctBy(topic => topic.Id)
+            .Where(topic => !FavoritesOnly || topic.IsFavorite)
+            .OrderByDescending(topic => topic.IsFavorite).ThenBy(topic => topic.Title);
+        foreach (var a in matches)
         {
             var item = new AssociationViewModel(a);
             item.PropertyChanged += AssociationChanged;

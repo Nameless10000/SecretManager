@@ -23,9 +23,10 @@ public static class VaultSelection
         return source with
         {
             Associations = associations,
+            Revisions = [],
             IsPartial = partial,
             // Older clients reject v2 instead of silently replacing a whole topic with a partial one.
-            SchemaVersion = partial ? 2 : 1
+            SchemaVersion = source.SchemaVersion >= 3 ? 3 : partial ? 2 : 1
         };
     }
 }
